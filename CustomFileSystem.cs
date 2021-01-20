@@ -17,33 +17,43 @@ namespace CustomFS
      *      -the last string in the path is the file's (or folder's) name, the string before it is its parent
      * */
 
+
+    /*
+     * PROBLEMS:
+     * BTree search function is not working properly because of File.CompareTo method!!!
+     * 
+     */
+
     class CustomFileSystem : IDokanOperations
     {
         private static readonly int capacity = 500*1024*1024; //500 MiB
         private long freeBytesAvailable = capacity;
-        //private static readonly SystemTree fileSystem = new SystemTree();
-        //private static readonly BTree fileTree = new BTree();
         private static readonly File root = new File(@"\", null, true);
-        //private readonly string pathPrefix;
 
-        //private File currentDir;
-
-
+        public CustomFileSystem()
+        {
+            root.absoluteParentPath = "";
+        }
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
             bool isDirectory = info.IsDirectory;
             File wantedFile = findFolder(fileName, false);
             if (info.DeleteOnClose == true)
+            {
+                if (isDirectory == true) 
+                    freeBytesAvailable += wantedFile.directoryContents.totalDirectorySize;
+                else 
+                    freeBytesAvailable += wantedFile.data.Length;
                 wantedFile.parentDir.directoryContents.remove(wantedFile);
+            }
         }
  
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
-            //what to do with root?
+            //what to do with root folder (\) and with desktop.ini?
             if (fileName.Equals(@"\"))
                 return NtStatus.Success;
 
-         
             File parent = findFolder(fileName, mode == FileMode.CreateNew || mode == FileMode.Create);
             if (parent == null)
                 return NtStatus.Error;
@@ -53,7 +63,7 @@ namespace CustomFS
             {
                 File existing = parent.directoryContents.search(Path.GetFileName(fileName));
                 if (existing != null)
-                    return NtStatus.Success;
+                    return DokanResult.AlreadyExists;
             }
           
 
@@ -63,9 +73,10 @@ namespace CustomFS
                 {
                     case FileMode.CreateNew:
                         File newFolder = new File(Path.GetFileName(fileName), parent, true);
-                        parent.directoryContents.insert(newFolder); //set found file as parent.
+                        string parentName = (parent.name == @"\") ? "" : parent.name;
+                        newFolder.absoluteParentPath = parent.absoluteParentPath + @"\" + parentName;
+                        parent.directoryContents.insert(newFolder);
                         newFolder.dateCreated = DateTime.Now;
-                        //fileTree.insert(file);
                         break;
                 }
             }
@@ -78,14 +89,10 @@ namespace CustomFS
                     case FileMode.CreateNew:
                         //create file
                         File newFile = new File(Path.GetFileName(fileName), parent, false);
+                        newFile.absoluteParentPath = parent.absoluteParentPath + @"\" + parent.name;
                         parent.directoryContents.insert(newFile);
                         newFile.dateCreated = DateTime.Now;
-                        //fileTree.insert(file);
                         break;
-                    /*case FileMode.Open:
-                        if (file == null)
-                            return NtStatus.Error;
-                        break;*/
                 }
             }
 
@@ -120,11 +127,11 @@ namespace CustomFS
             //format of the path: \first\second\...\last
             if (fileName.Equals(@"\"))
                 return root;
-            if (fileName.Contains("desktop.ini"))
+            if (fileName.Contains("desktop.ini")) //why does desktop.ini appear and why are files treated as folders that contain desktop.ini?
                 return null;
             File folder = root;
 
-            string[] subFolders = fileName.Split('\\'); //first string is an empty string because of the format above
+            string[] subFolders = fileName.Split('\\'); //first string is an empty string because of the first slash
             int counter = (create == true) ? subFolders.Length - 1 : subFolders.Length;
 
             BTree currentTree = root.directoryContents;
@@ -142,24 +149,17 @@ namespace CustomFS
         
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
-            //all files are currently displayed, there is no hierarchy
-
-            File directory = findFolder(fileName, false);
-            //List<File> tempList = new List<File>;
-
-            //currentDir.directoryContents.traverse(out traverseResults);
-            //fileTree.traverse(out tempList);
+            File directory = findFolder(fileName, false); //assuming that fileName is a path of a directory that exists
 
             files = new List<FileInformation>();
-            //if (fileName.Equals(@"\"))
-            //fileName = "";
             if (directory != null)
             {
                 List<File> traverseResults;
                 directory.directoryContents.traverse(out traverseResults);
-                if (traverseResults == null)
+                if (traverseResults == null) //directory is empty
                     return NtStatus.Success;
 
+    
                 foreach (File foundFile in traverseResults)
                 {
                     long fileLen = (foundFile.data == null) ? 0 : foundFile.data.Length;
@@ -174,9 +174,10 @@ namespace CustomFS
                         fileInfo.Attributes = FileAttributes.Normal;
                     files.Add(fileInfo);
                 }
+                return NtStatus.Success;
             }
     
-            return NtStatus.Success;
+            return NtStatus.Error;
         }
 
         public NtStatus FindFilesWithPattern(string fileName, string searchPattern, out IList<FileInformation> files, IDokanFileInfo info)
@@ -207,10 +208,6 @@ namespace CustomFS
         public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, IDokanFileInfo info)
         {
             //what to do with root directory?This might be the problem when writing larger files.
-            if(fileName.Contains("februar"))
-            {
-                int a = 2;
-            }
 
             File file = findFolder(fileName, false);
           
@@ -238,6 +235,8 @@ namespace CustomFS
 
         public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info)
         {
+            //what to do in this method?
+
             if (info == null)
                 throw new ArgumentNullException(nameof(info));
 
@@ -257,20 +256,45 @@ namespace CustomFS
             volumeLabel = "My file system";
             features = FileSystemFeatures.None;
             fileSystemName = "OPOSFileSystem";
-            maximumComponentLength = 15; //max file name?
+            maximumComponentLength = 256; //max file name length?
             return NtStatus.Success;
         }
         public NtStatus MoveFile(string oldName, string newName, bool replace, IDokanFileInfo info)
         {
-            if (replace)
-                return NtStatus.NotImplemented;
-
             if (oldName == newName)
                 return NtStatus.Success;
+            
+            if(oldName.Contains("raspored"))
+            {
+                int a = 3;
+            }
+
+            File fileToMove = findFolder(oldName, false);
+            File newParent = findFolder(newName, true);
+            
+            //if oldName's and newName's parent is the same, only name is changed
+            if(fileToMove.parentDir.absoluteParentPath.Equals(newParent.absoluteParentPath))
+            {
+                fileToMove.changeName(Path.GetFileName(newName));
+            }
+            //else, the file is being moved
+            else
+            {
+                if (newParent == null)
+                    return NtStatus.Error;
+
+                //check if such a file already exists
+                File exists = newParent.directoryContents.search(Path.GetFileName(newName));
+                if(exists != null && replace == false)
+                    return DokanResult.AlreadyExists;
+
+                fileToMove.parentDir.directoryContents.remove(fileToMove);
+                newParent.directoryContents.insert(fileToMove);
+            }
+            
 
             // TODO: Moving a directory.
-
-            // TODO: Moving a file.
+            //info.isDirectory will be false even when directory is moved
 
             return NtStatus.Success;
         }
@@ -279,42 +303,36 @@ namespace CustomFS
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
             bytesRead = 0;
-            //File existingFile = currentDir.directoryContents.search(fileName);
             File existingFile = findFolder(fileName, false);
             if ((existingFile == null) || (existingFile.data == null))
                 return NtStatus.Error;
             int offsetInt = (int)offset;
-            //existingFile.data.Skip(offsetInt).Take(buffer.Length).ToArray().CopyTo(buffer, 0);
 
             //cases:
-            //1)buffer is bigger than existingFile.data.Length - offset
-                //read only existingFile.data.Length - offset data
+            //1)buffer is bigger than (existingFile.data.Length - offset)
+                //read only (existingFile.data.Length - offset) amount of data
             //2)buffer is smaller than existingFile.data.Length - offset
                 //read only buffer.Length data
-            long amountOfDataToRead = (buffer.Length > (existingFile.data.Length - offset)) ? existingFile.data.Length - offset : buffer.Length;
+            long amountOfDataToRead = (buffer.Length > (existingFile.data.Length - offset)) ? (existingFile.data.Length - offset) : buffer.Length;
             Array.Copy(existingFile.data, offset, buffer, 0, amountOfDataToRead);
 
-            int diff = existingFile.data.Length - offsetInt;
-            bytesRead = buffer.Length > diff ? diff : buffer.Length;
+            bytesRead = (int)amountOfDataToRead;
             return NtStatus.Success;
         }
 
         //method that writes a file onto the file system
         public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten, long offset, IDokanFileInfo info)
         {
-            //THE PROBLEM IS WHEN THE DATA CAN'T FIT IN THE BUFFER,it causes some unexpected error
-            //when the entire file can fit into the buffer, the file is copied without any problems
+            //THE PROBLEM OCCURS WHEN THE DATA CAN'T FIT IN THE BUFFER,it causes some unexpected error.
+            //When the entire file can fit into the buffer, the file is copied without any problems.
 
             //should be called after createFile method
             bytesWritten = 0;
-            //File file = currentDir.directoryContents.search(fileName);
             File file = findFolder(fileName, false); //argument false means that this file already exists in the root tree
-          
 
             if(file == null)
-            {
                 return NtStatus.Error;
-            }
+            
 
             if ((file.data != null) && (offset > file.data.Length))
             {
@@ -322,7 +340,24 @@ namespace CustomFS
                 return NtStatus.ArrayBoundsExceeded;
             }
 
-            if (info.WriteToEndOfFile) //append data
+            if (file.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
+            {
+                byte[] newData = new byte[offset + buffer.Length];
+                freeBytesAvailable -= (newData.Length - file.data.Length);
+                bytesWritten = (newData.Length - file.data.Length);
+                Array.Copy(file.data, 0, newData, 0, offset);
+                Array.Copy(buffer, 0, newData, offset, buffer.Length);
+                file.data = newData;
+            }
+            else
+            {
+                //data can fit into the buffer
+                Array.Copy(buffer, 0, file.data, offset, buffer.Length);
+                freeBytesAvailable -= buffer.Length;
+                bytesWritten = buffer.Length;
+            }
+
+            /*if (info.WriteToEndOfFile) //append data.Problem: when offset != 0, this flag isn't set.
             {
                 if(file.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
                 {
@@ -338,18 +373,13 @@ namespace CustomFS
                     //data can fit into the buffer
                     Array.Copy(buffer, 0, file.data, offset, buffer.Length);
                     freeBytesAvailable -= buffer.Length;
+                    bytesWritten = buffer.Length;
                 }
             }
             else
             {
-                //write new data
-                int fileLength = (file.data == null) ? 0 : file.data.Length;
-                freeBytesAvailable -= (buffer.Length - fileLength);
-                file.data = new byte[buffer.Length];
-                Array.Copy(buffer, 0, file.data, 0, buffer.Length);
-                //file.data = file.data.Take((int)offset).Concat(buffer).ToArray();
-                bytesWritten = buffer.Length;
-            }
+                //this will be called even when offset != 0
+            }*/
 
             // TODO: Update date modified.
             return NtStatus.Success;
@@ -369,7 +399,7 @@ namespace CustomFS
             return NtStatus.Error;
         }
 
-        public void CloseFile(string fileName, IDokanFileInfo info)  { info.Context = null; }
+        public void CloseFile(string fileName, IDokanFileInfo info) { } //info.Context = null; }
         public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;

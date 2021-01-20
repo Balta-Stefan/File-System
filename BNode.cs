@@ -169,7 +169,7 @@ namespace CustomFS
 			return index;
 		}
 
-		public void remove(File key)
+		public bool remove(File key)
 		{
 			int index = findKey(key);
 
@@ -179,18 +179,15 @@ namespace CustomFS
 				// If the node is a isLeaf node - removeFromLeaf  is called 
 				// Otherwise, removeFromNonLeaf function is called 
 				if (isLeaf)
-					removeFromLeaf (index);
+					return removeFromLeaf (index);
 				else
-					removeFromNonLeaf(index);
+					return removeFromNonLeaf(index);
 			}
 			else
 			{
-
 				// If this node is a isLeaf node, then the key is not present in tree 
 				if (isLeaf)
-					return;
-				
-
+					return false;
 				// The key to be removed is present in the sub-tree rooted with this node 
 				// The flag indicates whether the key is present in the sub-tree rooted 
 				// with the last child of this node 
@@ -209,7 +206,7 @@ namespace CustomFS
 				else
 					childNodes[index].remove(key);
 			}
-			return;
+			return false;
 		}
 
 		void fill(int index)
@@ -351,7 +348,7 @@ namespace CustomFS
 			return;
 		}
 
-		void removeFromNonLeaf(int index)
+		bool removeFromNonLeaf(int index)
 		{
 
 			File k = keys[index];
@@ -388,7 +385,7 @@ namespace CustomFS
 				merge(index);
 				childNodes[index].remove(k);
 			}
-			return;
+			return true;
 		}
 
 		File getPredecessor(int index)
@@ -414,7 +411,7 @@ namespace CustomFS
 			return cur.keys[0];
 		}
 
-		void removeFromLeaf(int index)
+		bool removeFromLeaf(int index)
 		{
 
 			// Move all the keys after the idx-th pos one place backward 
@@ -423,8 +420,7 @@ namespace CustomFS
 
 			// Reduce the count of keys 
 			currentNumOfKeys--;
-
-			return;
+			return true;
 		}
 	}
 
@@ -433,8 +429,9 @@ namespace CustomFS
 		//contains the entire file system
 		private static Mutex mutex = new Mutex();
 		protected BTreeNode root=null; // Pointer to root node 
-		int numOfFiles = 0;
-		private static readonly int minimumDegree = 25;
+		public int numOfFiles = 0;
+		public long totalDirectorySize = 0;
+		private static readonly int minimumDegree = 256;
 
 
 		// function to traverse the tree 
@@ -499,6 +496,9 @@ namespace CustomFS
 				else  // If root is not full, call insertNonFull for root 
 					root.insertNonFull(key);
 			}
+			numOfFiles++;
+			if(key.isDir == false)
+				totalDirectorySize += key.data.Length;
 			mutex.ReleaseMutex();
 		}
 
@@ -509,7 +509,15 @@ namespace CustomFS
 
 			mutex.WaitOne();
 			// Call the remove function for root 
-			root.remove(key);
+			if (root.remove(key) == true)
+            {
+				numOfFiles--;
+				if (key.isDir == false)
+					totalDirectorySize -= key.data.Length;
+				else
+					totalDirectorySize -= key.directoryContents.totalDirectorySize;
+			}
+				
 
 			// If the root node has 0 keys, make its first child as the new root 
 			//  if it has a child, otherwise set root as NULL 
