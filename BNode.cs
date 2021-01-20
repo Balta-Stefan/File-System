@@ -527,14 +527,4 @@ namespace CustomFS
 		}
 	}
 
-	public class SystemTree
-	{
-		BTree tree;
-		public File rootDirectory = new File("\\", null, true);
-		public SystemTree()
-        {
-			tree = new BTree();
-			tree.insert(rootDirectory);
-		}
-    }
 }

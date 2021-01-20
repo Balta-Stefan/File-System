@@ -12,7 +12,7 @@ namespace CustomFS
 		public bool isDir { get; }
 		public File parentDir;
 		public DateTime dateCreated;
-		//public BTree directoryContents { get; } //used only for directories
+		public BTree directoryContents { get; } //used only for directories
 		public byte[] data; //null if isDir == true
 							//Permissions perms;
 
@@ -23,8 +23,8 @@ namespace CustomFS
 			this.isDir = isDir;
 			this.parentDir = parentDir;
 
-			//if (isDir == true)
-				//directoryContents = new BTree();
+			if (isDir == true)
+				directoryContents = new BTree();
         }
 
 		public int CompareTo(object val)

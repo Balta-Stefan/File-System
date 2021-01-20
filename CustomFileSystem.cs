@@ -9,92 +9,84 @@ using DokanNet;
 
 namespace CustomFS
 {
+
+    /*
+     * Every folder will have its own B tree.
+     * When creating files and folders- find its parent.
+     *      -this is accomplished by breaking the path and descending down the tree
+     *      -the last string in the path is the file's (or folder's) name, the string before it is its parent
+     * */
+
     class CustomFileSystem : IDokanOperations
     {
         private static readonly int capacity = 500*1024*1024; //500 MiB
         private long freeBytesAvailable = capacity;
         //private static readonly SystemTree fileSystem = new SystemTree();
-        private static readonly BTree fileTree = new BTree();
-        private readonly string pathPrefix;
+        //private static readonly BTree fileTree = new BTree();
+        private static readonly File root = new File(@"\", null, true);
+        //private readonly string pathPrefix;
 
         //private File currentDir;
-        public CustomFileSystem(string root)
-        {
-            pathPrefix = root;
-            //fileTree.insert(new File(pathPrefix + @"\", null, true));
-        }
+
 
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
             bool isDirectory = info.IsDirectory;
-            File wantedFile = new File(fileName, null, isDirectory);
+            File wantedFile = findFolder(fileName, false);
             if (info.DeleteOnClose == true)
-            {
-                fileTree.remove(new File(fileName, null, info.IsDirectory));
-                //currentDir.directoryContents.remove(wantedFile);
-            }
+                wantedFile.parentDir.directoryContents.remove(wantedFile);
         }
-
+ 
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
+            //what to do with root?
             if (fileName.Equals(@"\"))
-                fileName = "";
-            string filePath = pathPrefix + fileName;
-            File file = fileTree.search(filePath);
- 
-            if(info.IsDirectory == true)
+                return NtStatus.Success;
+
+         
+            File parent = findFolder(fileName, mode == FileMode.CreateNew || mode == FileMode.Create);
+            if (parent == null)
+                return NtStatus.Error;
+
+            //see if the file already exists if mode is CreateNew or Create
+            if(mode == FileMode.CreateNew || mode == FileMode.Create)
             {
-                //create folder
-                /*switch (mode)
-                {
-                    case FileMode.Open:
-                        if(file == null)
-                        {
-                            return NtStatus.Error;
-                        }
-                        break;
-                    case FileMode.CreateNew:
-                        if(file != null || fileName.Equals(""))
-                        {
-                            return NtStatus.Error;
-                        }
-                        Directory.CreateDirectory(fileName);
-                        File newDirectory = new File(filePath, null, true)
-                        newDirectory.dateCreated = DateTime.Now;
-                        fileTree.insert(newDirectory);
-                        break;
-                }*/
+                File existing = parent.directoryContents.search(Path.GetFileName(fileName));
+                if (existing != null)
+                    return NtStatus.Success;
             }
-            else
+          
+
+            if (attributes == FileAttributes.Directory || info.IsDirectory == true)
             {
                 switch(mode)
                 {
                     case FileMode.CreateNew:
+                        File newFolder = new File(Path.GetFileName(fileName), parent, true);
+                        parent.directoryContents.insert(newFolder); //set found file as parent.
+                        newFolder.dateCreated = DateTime.Now;
+                        //fileTree.insert(file);
+                        break;
+                }
+            }
+            else
+            {
+                info.IsDirectory = false;
+                
+                switch(mode)
+                {
+                    case FileMode.CreateNew:
                         //create file
-                        if (file == null)
-                        {
-                            File newFile = new File(fileName, null, false);
-                            newFile.dateCreated = DateTime.Now;
-                            fileTree.insert(newFile);
-                        }
-                           
-                        else
-                            return DokanResult.AlreadyExists;
+                        File newFile = new File(Path.GetFileName(fileName), parent, false);
+                        parent.directoryContents.insert(newFile);
+                        newFile.dateCreated = DateTime.Now;
+                        //fileTree.insert(file);
                         break;
                     /*case FileMode.Open:
                         if (file == null)
                             return NtStatus.Error;
                         break;*/
                 }
-                if (System.IO.File.Exists(fileName))
-                {
-                    FileAttributes new_attributes = attributes;
-                    new_attributes |= FileAttributes.Archive; // Files are always created as Archive
-                                                              // FILE_ATTRIBUTE_NORMAL is override if any other attribute is set.
-                    new_attributes &= ~FileAttributes.Normal;
-                    System.IO.File.SetAttributes(fileName, new_attributes);
-                }
-
             }
 
             return NtStatus.Success;
@@ -111,6 +103,9 @@ namespace CustomFS
 
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
+            //problem: for some reason, this method is called even when the user isn't deleting the file (it gets called when moving a file)
+            //File fl = fileTree.search(fileName);
+
             if (info.IsDirectory)
                 return NtStatus.Error;
             // DeleteOnClose gets or sets a value indicating whether the file has to be deleted during the IDokanOperations.Cleanup event. 
@@ -118,25 +113,65 @@ namespace CustomFS
             return NtStatus.Success;
         }
 
+        public File findFolder(string fileName, bool create)
+        {
+            //flag create tells whether the last part of fileName exists.If it doesn't, find the parent
+
+            //format of the path: \first\second\...\last
+            if (fileName.Equals(@"\"))
+                return root;
+            if (fileName.Contains("desktop.ini"))
+                return null;
+            File folder = root;
+
+            string[] subFolders = fileName.Split('\\'); //first string is an empty string because of the format above
+            int counter = (create == true) ? subFolders.Length - 1 : subFolders.Length;
+
+            BTree currentTree = root.directoryContents;
+
+            for(int i = 1; i < counter; i++)
+            {
+                folder = currentTree.search(subFolders[i]);
+                if (folder == null)
+                    return null;
+                currentTree = folder.directoryContents; //could null pointer exception occur here?
+            }
+
+            return folder;
+        }
+        
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
-            List<File> traverseResults;
+            //all files are currently displayed, there is no hierarchy
+
+            File directory = findFolder(fileName, false);
+            //List<File> tempList = new List<File>;
+
             //currentDir.directoryContents.traverse(out traverseResults);
-            fileTree.traverse(out traverseResults);
-            
+            //fileTree.traverse(out tempList);
+
             files = new List<FileInformation>();
-            if (fileName.Equals(@"\"))
-                fileName = "";
-            if (traverseResults != null)
+            //if (fileName.Equals(@"\"))
+            //fileName = "";
+            if (directory != null)
             {
+                List<File> traverseResults;
+                directory.directoryContents.traverse(out traverseResults);
+                if (traverseResults == null)
+                    return NtStatus.Success;
+
                 foreach (File foundFile in traverseResults)
                 {
                     long fileLen = (foundFile.data == null) ? 0 : foundFile.data.Length;
                     FileInformation fileInfo = new FileInformation();
-                    fileInfo.FileName = Path.GetFileName(foundFile.name);
+                    fileInfo.FileName = foundFile.name;
                     fileInfo.Length = fileLen;
                     fileInfo.CreationTime = DateTime.Now;
                     fileInfo.LastWriteTime = DateTime.Now;
+                    if (foundFile.isDir == true)
+                        fileInfo.Attributes = FileAttributes.Directory;
+                    else
+                        fileInfo.Attributes = FileAttributes.Normal;
                     files.Add(fileInfo);
                 }
             }
@@ -171,8 +206,13 @@ namespace CustomFS
 
         public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, IDokanFileInfo info)
         {
-            //File file = currentDir.directoryContents.search(fileName);
-            File file = fileTree.search(fileName);
+            //what to do with root directory?This might be the problem when writing larger files.
+            if(fileName.Contains("februar"))
+            {
+                int a = 2;
+            }
+
+            File file = findFolder(fileName, false);
           
                 
             if (file != null)
@@ -182,7 +222,7 @@ namespace CustomFS
                 {
                     FileName = Path.GetFileName(fileName),
                     Length = fileLen,
-                    Attributes = FileAttributes.Normal,
+                    Attributes = (file.isDir == true) ? FileAttributes.Directory : FileAttributes.Normal,
                     CreationTime = file.dateCreated,
                     LastWriteTime = DateTime.Now
                 };
@@ -198,8 +238,18 @@ namespace CustomFS
 
         public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info)
         {
-            security = null;
+            if (info == null)
+                throw new ArgumentNullException(nameof(info));
+
+            security = info.IsDirectory
+                ? new DirectorySecurity() as FileSystemSecurity
+                : new FileSecurity() as FileSystemSecurity;
+            security.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null), FileSystemRights.FullControl, AccessControlType.Allow));
+
             return NtStatus.Success;
+
+            //security = null;
+            //return NtStatus.NotImplemented;
         }
 
         public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features, out string fileSystemName, out uint maximumComponentLength, IDokanFileInfo info)
@@ -230,44 +280,73 @@ namespace CustomFS
         {
             bytesRead = 0;
             //File existingFile = currentDir.directoryContents.search(fileName);
-            File existingFile = fileTree.search(fileName);
+            File existingFile = findFolder(fileName, false);
             if ((existingFile == null) || (existingFile.data == null))
                 return NtStatus.Error;
             int offsetInt = (int)offset;
-            existingFile.data.Skip(offsetInt).Take(buffer.Length).ToArray().CopyTo(buffer, 0);
+            //existingFile.data.Skip(offsetInt).Take(buffer.Length).ToArray().CopyTo(buffer, 0);
+
+            //cases:
+            //1)buffer is bigger than existingFile.data.Length - offset
+                //read only existingFile.data.Length - offset data
+            //2)buffer is smaller than existingFile.data.Length - offset
+                //read only buffer.Length data
+            long amountOfDataToRead = (buffer.Length > (existingFile.data.Length - offset)) ? existingFile.data.Length - offset : buffer.Length;
+            Array.Copy(existingFile.data, offset, buffer, 0, amountOfDataToRead);
+
             int diff = existingFile.data.Length - offsetInt;
             bytesRead = buffer.Length > diff ? diff : buffer.Length;
             return NtStatus.Success;
         }
 
+        //method that writes a file onto the file system
         public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten, long offset, IDokanFileInfo info)
         {
+            //THE PROBLEM IS WHEN THE DATA CAN'T FIT IN THE BUFFER,it causes some unexpected error
+            //when the entire file can fit into the buffer, the file is copied without any problems
+
+            //should be called after createFile method
             bytesWritten = 0;
             //File file = currentDir.directoryContents.search(fileName);
-            File file = fileTree.search(fileName);
+            File file = findFolder(fileName, false); //argument false means that this file already exists in the root tree
+          
 
             if(file == null)
             {
                 return NtStatus.Error;
             }
 
-            else if ((file.data != null) && (offset > file.data.Length))
+            if ((file.data != null) && (offset > file.data.Length))
             {
                 bytesWritten = 0;
                 return NtStatus.ArrayBoundsExceeded;
             }
 
-            if (info.WriteToEndOfFile)
+            if (info.WriteToEndOfFile) //append data
             {
-                // TODO: Appending.
+                if(file.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
+                {
+                    byte[] newData = new byte[offset + buffer.Length];
+                    freeBytesAvailable -= (newData.Length - file.data.Length);
+                    bytesWritten = (newData.Length - file.data.Length);
+                    Array.Copy(file.data, 0, newData, 0, offset);
+                    Array.Copy(buffer, 0, newData, offset, buffer.Length);
+                    file.data = newData;
+                }
+                else
+                {
+                    //data can fit into the buffer
+                    Array.Copy(buffer, 0, file.data, offset, buffer.Length);
+                    freeBytesAvailable -= buffer.Length;
+                }
             }
             else
             {
+                //write new data
+                int fileLength = (file.data == null) ? 0 : file.data.Length;
+                freeBytesAvailable -= (buffer.Length - fileLength);
                 file.data = new byte[buffer.Length];
-                long difference = file.data.Length - offset;
-                freeBytesAvailable -= difference;
-                for (long i = 0; i < buffer.Length; i++)
-                    file.data[i] = buffer[i];
+                Array.Copy(buffer, 0, file.data, 0, buffer.Length);
                 //file.data = file.data.Take((int)offset).Concat(buffer).ToArray();
                 bytesWritten = buffer.Length;
             }
@@ -276,13 +355,26 @@ namespace CustomFS
             return NtStatus.Success;
         }
 
-        public void CloseFile(string fileName, IDokanFileInfo info) { }
+        public NtStatus SetFileSecurity(string fileName, FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info)
+        {
+            File file = findFolder(fileName, false);
+            if(file != null)
+            {
+                if(file.isDir == true)
+                    Directory.SetAccessControl(fileName, (DirectorySecurity)security);
+                else
+                    System.IO.File.SetAccessControl(fileName, (FileSecurity)security);
+                return NtStatus.Success;
+            }
+            return NtStatus.Error;
+        }
+
+        public void CloseFile(string fileName, IDokanFileInfo info)  { info.Context = null; }
         public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.Success;
-        public NtStatus SetFileSecurity(string fileName, FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Unmounted(IDokanFileInfo info) => NtStatus.Success;
