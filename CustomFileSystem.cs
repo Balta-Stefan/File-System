@@ -12,7 +12,7 @@ namespace CustomFS
 
     /*
      * Every folder will have its own B tree.
-     * When creating files and folders- find its parent.
+     * When creating files and folders - find its parent.
      *      -this is accomplished by breaking the path and descending down the tree
      *      -the last string in the path is the file's (or folder's) name, the string before it is its parent
      * */
@@ -21,7 +21,7 @@ namespace CustomFS
     /*
      * PROBLEMS:
      * BTree search function is not working properly because of File.CompareTo method!!!
-     * 
+     * BTree search function is not working properly because, to compare files and folders, we need to know if it's a file or folder.The search function doesn't take that into account because it only compares strings.
      */
 
     class CustomFileSystem : IDokanOperations
@@ -36,11 +36,10 @@ namespace CustomFS
         }
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
-            bool isDirectory = info.IsDirectory;
-            File wantedFile = findFolder(fileName, false);
+            File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
-                if (isDirectory == true) 
+                if (wantedFile.isDir == true) 
                     freeBytesAvailable += wantedFile.directoryContents.totalDirectorySize;
                 else 
                     freeBytesAvailable += wantedFile.data.Length;
@@ -51,29 +50,37 @@ namespace CustomFS
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
             //what to do with root folder (\) and with desktop.ini?
-            if (fileName.Equals(@"\"))
+            if (fileName.Equals(@"\") || fileName.Contains("esktop.ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
                 return NtStatus.Success;
 
-            File parent = findFolder(fileName, mode == FileMode.CreateNew || mode == FileMode.Create);
+            //when a file is first created, CreateFile will be called with mode equal to FileMode.Open
+            //after that, it will be called with mode equal to FileMode.CreateNew
+                //when mode is CreateNew, info.isDirectory seems to be correct.In all other cases, it isn't.
+                //therefore, one folder can't hold a file and folder with the same name
+
+
+            File parent = findParent(fileName);
             if (parent == null)
                 return NtStatus.Error;
 
-            //see if the file already exists if mode is CreateNew or Create
-            if(mode == FileMode.CreateNew || mode == FileMode.Create)
-            {
-                File existing = parent.directoryContents.search(Path.GetFileName(fileName));
-                if (existing != null)
-                    return DokanResult.AlreadyExists;
-            }
-          
+            File existing = parent.directoryContents.search(Path.GetFileName(fileName));
 
-            if (attributes == FileAttributes.Directory || info.IsDirectory == true)
+            //see if the file already exists if mode is CreateNew or Create
+            if ((mode == FileMode.CreateNew || mode == FileMode.Create || mode == FileMode.OpenOrCreate) && existing != null)
+                return DokanResult.AlreadyExists;
+
+
+
+            bool fileIsDirectory = (existing == null) ? false : existing.isDir;
+
+            if (attributes == FileAttributes.Directory || info.IsDirectory == true || fileIsDirectory)
             {
+                info.IsDirectory = true;
                 switch(mode)
                 {
                     case FileMode.CreateNew:
                         File newFolder = new File(Path.GetFileName(fileName), parent, true);
-                        string parentName = (parent.name == @"\") ? "" : parent.name;
+                        string parentName = (parent.name.Equals(@"\")) ? "" : parent.name;
                         newFolder.absoluteParentPath = parent.absoluteParentPath + @"\" + parentName;
                         parent.directoryContents.insert(newFolder);
                         newFolder.dateCreated = DateTime.Now;
@@ -89,7 +96,7 @@ namespace CustomFS
                     case FileMode.CreateNew:
                         //create file
                         File newFile = new File(Path.GetFileName(fileName), parent, false);
-                        newFile.absoluteParentPath = parent.absoluteParentPath + @"\" + parent.name;
+                        //newFile.absoluteParentPath = parent.absoluteParentPath + @"\" + parent.name;
                         parent.directoryContents.insert(newFile);
                         newFile.dateCreated = DateTime.Now;
                         break;
@@ -101,7 +108,9 @@ namespace CustomFS
 
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
-            if (!info.IsDirectory)
+            File directory = findFile(fileName);
+
+            if (directory == null || directory.isDir == false)
                 return NtStatus.Error;
             // DeleteOnClose gets or sets a value indicating whether the file has to be deleted during the IDokanOperations.Cleanup event. 
             info.DeleteOnClose = true;
@@ -112,17 +121,18 @@ namespace CustomFS
         {
             //problem: for some reason, this method is called even when the user isn't deleting the file (it gets called when moving a file)
             //File fl = fileTree.search(fileName);
+            File file = findFile(fileName);
 
-            if (info.IsDirectory)
+            if (file == null || file.isDir == true)
                 return NtStatus.Error;
             // DeleteOnClose gets or sets a value indicating whether the file has to be deleted during the IDokanOperations.Cleanup event. 
             info.DeleteOnClose = true;
             return NtStatus.Success;
         }
 
-        public File findFolder(string fileName, bool create)
+        public File findParent(string fileName)
         {
-            //flag create tells whether the last part of fileName exists.If it doesn't, find the parent
+            //method fins parent of the path specified by fileName
 
             //format of the path: \first\second\...\last
             if (fileName.Equals(@"\"))
@@ -132,11 +142,10 @@ namespace CustomFS
             File folder = root;
 
             string[] subFolders = fileName.Split('\\'); //first string is an empty string because of the first slash
-            int counter = (create == true) ? subFolders.Length - 1 : subFolders.Length;
 
             BTree currentTree = root.directoryContents;
 
-            for(int i = 1; i < counter; i++)
+            for (int i = 1; i < subFolders.Length-1; i++)
             {
                 folder = currentTree.search(subFolders[i]);
                 if (folder == null)
@@ -146,10 +155,23 @@ namespace CustomFS
 
             return folder;
         }
+
+        public File findFile(string fileName)
+        {
+            //method returns the file specified by the fileName path.If it doesn't exist, null is returned.
+            if (fileName.Equals(@"\"))
+                return root;
+            File parent = findParent(fileName);
+            if (parent == null)
+                return null;
+            File fileToFind = parent.directoryContents.search(Path.GetFileName(fileName));
+
+            return fileToFind;
+        }
         
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
-            File directory = findFolder(fileName, false); //assuming that fileName is a path of a directory that exists
+            File directory = findFile(fileName);
 
             files = new List<FileInformation>();
             if (directory != null)
@@ -159,7 +181,8 @@ namespace CustomFS
                 if (traverseResults == null) //directory is empty
                     return NtStatus.Success;
 
-    
+           
+                //traverseResults.Sort(); //folders come before files.This isn't possible to do in the B tree itself because Dokan has no clue what is a file and what is a folder.It is up to the programmer to find out.
                 foreach (File foundFile in traverseResults)
                 {
                     long fileLen = (foundFile.data == null) ? 0 : foundFile.data.Length;
@@ -209,7 +232,7 @@ namespace CustomFS
         {
             //what to do with root directory?This might be the problem when writing larger files.
 
-            File file = findFolder(fileName, false);
+            File file = findFile(fileName);
           
                 
             if (file != null)
@@ -261,40 +284,43 @@ namespace CustomFS
         }
         public NtStatus MoveFile(string oldName, string newName, bool replace, IDokanFileInfo info)
         {
-            if (oldName == newName)
+            if (oldName.Equals(newName))
                 return NtStatus.Success;
-            
-            if(oldName.Contains("raspored"))
-            {
-                int a = 3;
-            }
 
-            File fileToMove = findFolder(oldName, false);
-            File newParent = findFolder(newName, true);
-            
-            //if oldName's and newName's parent is the same, only name is changed
-            if(fileToMove.parentDir.absoluteParentPath.Equals(newParent.absoluteParentPath))
-            {
-                fileToMove.changeName(Path.GetFileName(newName));
-            }
-            //else, the file is being moved
-            else
-            {
-                if (newParent == null)
-                    return NtStatus.Error;
+            File fileToMove = findFile(oldName);
+            File newParent = findParent(newName);
 
-                //check if such a file already exists
-                File exists = newParent.directoryContents.search(Path.GetFileName(newName));
-                if(exists != null && replace == false)
+            //remove the oldName from its parent
+            //check if it exists in the new directory
+
+            //this is inefficient and needs to be reworked:
+                //when both oldName and newName have the same parent, the file is only being renamed.What needs to be done is:
+                    //find the node in which oldName is located
+                    //rename oldName to newName
+                    //sort the node.Without sorting, the node will become corrupted
+                //when oldName's parrent is different from newName's parent (file is being moved):
+                    //find the parent of newName
+                    //check if the parent already contains oldName file/folder
+                        //if it contains:
+                            //if replace is false: return alreadyExists message
+                        //add oldName to the newName parent
+
+            fileToMove.parentDir.directoryContents.remove(fileToMove);
+            fileToMove.changeName(Path.GetFileName(newName));
+            File existingFile = newParent.directoryContents.search(fileToMove.name);
+            if(existingFile != null)
+            {
+                //file already exists
+                if (replace == false)
+                {
+                    fileToMove.changeName(Path.GetFileName(oldName));
+                    fileToMove.parentDir.directoryContents.insert(fileToMove);
                     return DokanResult.AlreadyExists;
-
-                fileToMove.parentDir.directoryContents.remove(fileToMove);
-                newParent.directoryContents.insert(fileToMove);
+                }
+                newParent.directoryContents.remove(existingFile);
             }
-            
-
-            // TODO: Moving a directory.
-            //info.isDirectory will be false even when directory is moved
+            //fileToMove.changeName(Path.GetFileName(newName));
+            newParent.directoryContents.insert(fileToMove);
 
             return NtStatus.Success;
         }
@@ -302,8 +328,12 @@ namespace CustomFS
         //read file contents into the buffer
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
+            if(fileName.Contains("raspored"))
+            {
+                int a = 3;
+            }
             bytesRead = 0;
-            File existingFile = findFolder(fileName, false);
+            File existingFile = findFile(fileName);
             if ((existingFile == null) || (existingFile.data == null))
                 return NtStatus.Error;
             int offsetInt = (int)offset;
@@ -328,7 +358,7 @@ namespace CustomFS
 
             //should be called after createFile method
             bytesWritten = 0;
-            File file = findFolder(fileName, false); //argument false means that this file already exists in the root tree
+            File file = findFile(fileName); //argument false means that this file already exists in the root tree
 
             if(file == null)
                 return NtStatus.Error;
@@ -387,7 +417,7 @@ namespace CustomFS
 
         public NtStatus SetFileSecurity(string fileName, FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info)
         {
-            File file = findFolder(fileName, false);
+            File file = findFile(fileName);
             if(file != null)
             {
                 if(file.isDir == true)
@@ -399,7 +429,7 @@ namespace CustomFS
             return NtStatus.Error;
         }
 
-        public void CloseFile(string fileName, IDokanFileInfo info) { } //info.Context = null; }
+        public void CloseFile(string fileName, IDokanFileInfo info) { info.Context = null; }
         public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;

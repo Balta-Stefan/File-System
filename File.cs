@@ -37,7 +37,7 @@ namespace CustomFS
         {
 			//directories should be "greater" than files
 			File file = (File)val;
-			bool bothDirectories = (isDir == true) && (file.isDir == true);
+			/*bool bothDirectories = (isDir == true) && (file.isDir == true);
 			if (bothDirectories)
 				return name.CompareTo(file.name);
 			else if ((isDir == true) && (file.isDir == false))
@@ -45,7 +45,7 @@ namespace CustomFS
 			else if ((isDir == false) && (file.isDir == true))
 				return -1;
 
-			//both are files
+			//both are files*/
 			return name.CompareTo(file.name);
         }
 
