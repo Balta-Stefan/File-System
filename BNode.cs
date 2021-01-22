@@ -497,10 +497,7 @@ namespace CustomFS
 					root.insertNonFull(key);
 			}
 			numOfFiles++;
-			if (key.isDir == false)
-				totalDirectorySize += key.data.Length;
-			else
-				totalDirectorySize += key.directoryContents.totalDirectorySize;
+			totalDirectorySize += (key.isDir == false) ? key.data.Length : key.directoryContents.totalDirectorySize;
 
 			//mutex.ReleaseMutex();
 		}
@@ -515,10 +512,7 @@ namespace CustomFS
 			if (root.remove(key) == true)
             {
 				numOfFiles--;
-				if (key.isDir == false)
-					totalDirectorySize -= key.data.Length;
-				else
-					totalDirectorySize -= key.directoryContents.totalDirectorySize;
+				totalDirectorySize -= (key.isDir == false) ? key.data.Length : key.directoryContents.totalDirectorySize;
 			}
 				
 

@@ -43,9 +43,9 @@ namespace CustomFS
 			else if ((isDir == true) && (file.isDir == false))
 				return 1;
 			else if ((isDir == false) && (file.isDir == true))
-				return -1;
+				return -1;*/
 
-			//both are files*/
+			//both are files
 			return name.CompareTo(file.name);
         }
 

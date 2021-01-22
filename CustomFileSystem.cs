@@ -47,18 +47,12 @@ namespace CustomFS
         {
             //This method is called only for the file that is deleted.
             //When fileName represents a folder, this method WILL NOT be called for all of its contents.It is up to the programmer to delete all contents of the folder.
-            if(fileName.Contains("second") && info.DeleteOnClose == true)
-            {
-                int a = 3;
-            }
+
 
             File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
-                if (wantedFile.isDir == true) 
-                    freeBytesAvailable += wantedFile.directoryContents.totalDirectorySize;
-                else 
-                    freeBytesAvailable += wantedFile.data.Length;
+                freeBytesAvailable += (wantedFile.isDir == true) ? wantedFile.directoryContents.totalDirectorySize : wantedFile.data.Length;
                 wantedFile.parentDir.directoryContents.remove(wantedFile);
             }
         }
@@ -282,7 +276,8 @@ namespace CustomFS
             if (info == null)
                 throw new ArgumentNullException(nameof(info));
 
-            /*security = info.IsDirectory
+            /*
+            security = info.IsDirectory
                 ? new DirectorySecurity() as FileSystemSecurity
                 : new FileSecurity() as FileSystemSecurity;
             security.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null), FileSystemRights.FullControl, AccessControlType.Allow));*/
@@ -358,10 +353,6 @@ namespace CustomFS
         //read file contents into the buffer
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
-            if(fileName.Contains("raspored"))
-            {
-                int a = 3;
-            }
             bytesRead = 0;
             File existingFile = findFile(fileName);
             if ((existingFile == null) || (existingFile.data == null))
