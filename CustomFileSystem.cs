@@ -24,18 +24,34 @@ namespace CustomFS
      * BTree search function is not working properly because, to compare files and folders, we need to know if it's a file or folder.The search function doesn't take that into account because it only compares strings.
      */
 
+    /*
+     * Questions:
+     * 1)When a file is being written via writeFile, how to detect when the writing has ended?
+     * 
+     * */
+
     class CustomFileSystem : IDokanOperations
     {
         private static readonly int capacity = 500*1024*1024; //500 MiB
         private long freeBytesAvailable = capacity;
         private static readonly File root = new File(@"\", null, true);
+        private readonly string drivePrefix;
+        private readonly string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
 
-        public CustomFileSystem()
+        public CustomFileSystem(string drivePrefix)
         {
             root.absoluteParentPath = "";
+            this.drivePrefix = drivePrefix;
         }
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
+            //This method is called only for the file that is deleted.
+            //When fileName represents a folder, this method WILL NOT be called for all of its contents.It is up to the programmer to delete all contents of the folder.
+            if(fileName.Contains("second") && info.DeleteOnClose == true)
+            {
+                int a = 3;
+            }
+
             File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
@@ -108,6 +124,8 @@ namespace CustomFS
 
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
+            //If fileName represents a folder, this method (or DeleteFile for files) WILL NOT be called for all of the fileName's contents.
+
             File directory = findFile(fileName);
 
             if (directory == null || directory.isDir == false)
@@ -119,7 +137,8 @@ namespace CustomFS
 
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
-            //problem: for some reason, this method is called even when the user isn't deleting the file (it gets called when moving a file)
+            //If a folder contains a file, deleting that folder won't call this method.Instead, it seems to be up to the programmer to delete the file by himself.
+
             //File fl = fileTree.search(fileName);
             File file = findFile(fileName);
 
@@ -141,7 +160,7 @@ namespace CustomFS
                 return null;
             File folder = root;
 
-            string[] subFolders = fileName.Split('\\'); //first string is an empty string because of the first slash
+            string[] subFolders = fileName.Split('\\'); //first string is an empty string because of the first slash.Last element is the file itself (thus the loop below avoids these two)
 
             BTree currentTree = root.directoryContents;
 
@@ -240,7 +259,7 @@ namespace CustomFS
                 long fileLen = (file.data == null) ? 0 : file.data.Length;
                 fileInfo = new FileInformation()
                 {
-                    FileName = Path.GetFileName(fileName),
+                    FileName = file.name,
                     Length = fileLen,
                     Attributes = (file.isDir == true) ? FileAttributes.Directory : FileAttributes.Normal,
                     CreationTime = file.dateCreated,
@@ -263,15 +282,21 @@ namespace CustomFS
             if (info == null)
                 throw new ArgumentNullException(nameof(info));
 
-            security = info.IsDirectory
+            /*security = info.IsDirectory
                 ? new DirectorySecurity() as FileSystemSecurity
                 : new FileSecurity() as FileSystemSecurity;
-            security.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null), FileSystemRights.FullControl, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null), FileSystemRights.FullControl, AccessControlType.Allow));*/
 
-            return NtStatus.Success;
+            security = null;
+            
 
-            //security = null;
+            File file = findFile(fileName);
+            if (file == null)
+                return DokanResult.FileNotFound;
+
+
             //return NtStatus.NotImplemented;
+            return NtStatus.Success;
         }
 
         public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features, out string fileSystemName, out uint maximumComponentLength, IDokanFileInfo info)
@@ -321,6 +346,11 @@ namespace CustomFS
             }
             //fileToMove.changeName(Path.GetFileName(newName));
             newParent.directoryContents.insert(fileToMove);
+            fileToMove.parentDir = newParent;
+            string parentName = (newParent.name.Equals(@"\")) ? "" : newParent.name;
+            string absoluteParentPath = (newParent.absoluteParentPath.Equals(@"\")) ? "" : newParent.absoluteParentPath;
+            if (fileToMove.isDir == true)
+                fileToMove.absoluteParentPath = absoluteParentPath + @"\" + parentName;
 
             return NtStatus.Success;
         }
@@ -343,6 +373,13 @@ namespace CustomFS
                 //read only (existingFile.data.Length - offset) amount of data
             //2)buffer is smaller than existingFile.data.Length - offset
                 //read only buffer.Length data
+            
+            if(existingFile.data.Length == 0)
+            {
+                bytesRead = 0;
+                return NtStatus.Success;
+            }
+
             long amountOfDataToRead = (buffer.Length > (existingFile.data.Length - offset)) ? (existingFile.data.Length - offset) : buffer.Length;
             Array.Copy(existingFile.data, offset, buffer, 0, amountOfDataToRead);
 
@@ -420,22 +457,22 @@ namespace CustomFS
             File file = findFile(fileName);
             if(file != null)
             {
-                if(file.isDir == true)
+                /*if(file.isDir == true)
                     Directory.SetAccessControl(fileName, (DirectorySecurity)security);
                 else
-                    System.IO.File.SetAccessControl(fileName, (FileSecurity)security);
+                    System.IO.File.SetAccessControl(fileName, (FileSecurity)security);*/
                 return NtStatus.Success;
             }
-            return NtStatus.Error;
+            return DokanResult.FileNotFound;
         }
 
-        public void CloseFile(string fileName, IDokanFileInfo info) { info.Context = null; }
+        public void CloseFile(string fileName, IDokanFileInfo info) { }
         public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
-        public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.Success;
-        public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.Error;
+        public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.NotImplemented;
+        public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Unmounted(IDokanFileInfo info) => NtStatus.Success;
     }

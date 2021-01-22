@@ -11,7 +11,7 @@ namespace CustomFS
     {
         static void Main(string[] args)
         {
-            new CustomFileSystem().Mount(@"Y:\", DokanOptions.DebugMode | DokanOptions.StderrOutput);
+            new CustomFileSystem("Y:").Mount(@"Y:\", DokanOptions.DebugMode | DokanOptions.StderrOutput);
         }
     }
 }
