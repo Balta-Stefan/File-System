@@ -22,6 +22,8 @@ namespace CustomFS
      * PROBLEMS:
      * BTree search function is not working properly because of File.CompareTo method!!!
      * BTree search function is not working properly because, to compare files and folders, we need to know if it's a file or folder.The search function doesn't take that into account because it only compares strings.
+     * When adding a file to a directory, size of the parent isn't changed, fix this!
+     * When a file is added to a folder, all parent folders need to have their sizes modified!
      */
 
     /*
@@ -48,7 +50,7 @@ namespace CustomFS
             //This method is called only for the file that is deleted.
             //When fileName represents a folder, this method WILL NOT be called for all of its contents.It is up to the programmer to delete all contents of the folder.
 
-
+            
             File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
@@ -59,8 +61,17 @@ namespace CustomFS
  
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
+            if(fileName.Contains(".pdf"))
+            {
+                int a = 3;
+            }
             //what to do with root folder (\) and with desktop.ini?
-            if (fileName.Equals(@"\") || fileName.Contains("esktop.ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
+            if(fileName.Equals(@"\"))
+            {
+                info.IsDirectory = true;
+                return NtStatus.Success;
+            }
+            else if (fileName.Contains("esktop.ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
                 return NtStatus.Success;
 
             //when a file is first created, CreateFile will be called with mode equal to FileMode.Open
@@ -244,13 +255,16 @@ namespace CustomFS
         public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, IDokanFileInfo info)
         {
             //what to do with root directory?This might be the problem when writing larger files.
-
             File file = findFile(fileName);
-          
+
                 
             if (file != null)
             {
-                long fileLen = (file.data == null) ? 0 : file.data.Length;
+                long fileLen;// = (file.data == null) ? 0 : file.data.Length;
+                if (file.isDir)
+                    fileLen = file.directoryContents.totalDirectorySize;
+                else
+                    fileLen = (file.data == null) ? 0 : file.data.Length;
                 fileInfo = new FileInformation()
                 {
                     FileName = file.name,
@@ -271,27 +285,49 @@ namespace CustomFS
 
         public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info)
         {
-            //what to do in this method?
+            //this method is probably used to set file permissions.No clue what SetFilePermissions is for then
+            //on NTFS, every file and folder has a set of access control information called security descriptor.
+            //permissions are assigned to specific users or groups
+            //each assignment of permissions to a user or a group is represented as an ACE (Access Control Entry)
+            //the entire set of permission entries in a security descriptor is known as ACL (Access Control List)
+
+
+            security = null;
+            /*if(fileName.Equals(@"\"))
+            {
+                //FileSecurity fSecurity = System.IO.File.GetAccessControl(@"Y:\");
+                //FileSecurity fSecurity = new FileSecurity(@"\", sections);
+                FileSecurity fSecurity = new FileSecurity();
+               
+
+                // Add the FileSystemAccessRule to the security settings.
+                fSecurity.AddAccessRule(new FileSystemAccessRule(userName,
+                    FileSystemRights.FullControl, AccessControlType.Allow));
+
+                // Set the new access settings.
+                //System.IO.File.SetAccessControl(@"\", fSecurity);
+                security = fSecurity;
+                return NtStatus.Success;
+            }
+
 
             if (info == null)
                 throw new ArgumentNullException(nameof(info));
 
-            /*
-            security = info.IsDirectory
-                ? new DirectorySecurity() as FileSystemSecurity
-                : new FileSecurity() as FileSystemSecurity;
-            security.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null), FileSystemRights.FullControl, AccessControlType.Allow));*/
 
-            security = null;
+            security = info.IsDirectory ? new DirectorySecurity() : new FileSecurity() as FileSystemSecurity; //as FileSystemSecurity;
+            security.AddAccessRule(new FileSystemAccessRule(new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null), FileSystemRights.FullControl, AccessControlType.Allow));
+
             
 
             File file = findFile(fileName);
             if (file == null)
-                return DokanResult.FileNotFound;
+                return DokanResult.FileNotFound;*/
 
+            //returning NotImplemented tells the library to set security with the security descriptor of the current process with authenticate user rights for context menu
 
-            //return NtStatus.NotImplemented;
-            return NtStatus.Success;
+            return NtStatus.NotImplemented;
+            //return NtStatus.Success;
         }
 
         public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features, out string fileSystemName, out uint maximumComponentLength, IDokanFileInfo info)
@@ -385,6 +421,7 @@ namespace CustomFS
             //When the entire file can fit into the buffer, the file is copied without any problems.
 
             //should be called after createFile method
+
             bytesWritten = 0;
             File file = findFile(fileName); //argument false means that this file already exists in the root tree
 
@@ -397,9 +434,11 @@ namespace CustomFS
                 bytesWritten = 0;
                 return NtStatus.ArrayBoundsExceeded;
             }
+            long changeInSize = 0;
 
             if (file.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
             {
+                changeInSize = buffer.Length + offset - file.data.Length;
                 byte[] newData = new byte[offset + buffer.Length];
                 freeBytesAvailable -= (newData.Length - file.data.Length);
                 bytesWritten = (newData.Length - file.data.Length);
@@ -409,10 +448,37 @@ namespace CustomFS
             }
             else
             {
-                //data can fit into the buffer
-                Array.Copy(buffer, 0, file.data, offset, buffer.Length);
-                freeBytesAvailable -= buffer.Length;
+                if((buffer.Length + offset) < file.data.Length)
+                {
+                    changeInSize = buffer.Length + offset - file.data.Length;
+                    if(offset != 0)
+                    {
+                        byte[] newBuffer = new byte[buffer.Length + offset];
+                        Array.Copy(file.data, 0, newBuffer, 0, offset);
+                        Array.Copy(buffer, 0, newBuffer, offset, buffer.Length);
+                        file.data = newBuffer;
+                    }
+                    else
+                    {
+                        file.data = new byte[buffer.Length];
+                        Array.Copy(buffer, file.data, buffer.Length);
+                    }
+                }
+                else
+                    Array.Copy(buffer, file.data, buffer.Length);
+                
+                freeBytesAvailable -= changeInSize;
                 bytesWritten = buffer.Length;
+            }
+
+            if (changeInSize == 0)
+                return NtStatus.Success;
+
+            File parent = file.parentDir;
+            while(parent != null)
+            {
+                parent.directoryContents.totalDirectorySize += changeInSize;
+                parent = parent.parentDir;
             }
 
             /*if (info.WriteToEndOfFile) //append data.Problem: when offset != 0, this flag isn't set.
@@ -456,12 +522,12 @@ namespace CustomFS
             }
             return DokanResult.FileNotFound;
         }
-
         public void CloseFile(string fileName, IDokanFileInfo info) { }
         public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
+        
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
-        public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
+        public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;

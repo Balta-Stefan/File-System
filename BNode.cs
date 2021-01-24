@@ -437,30 +437,30 @@ namespace CustomFS
 		// function to traverse the tree 
 		public void traverse(out List<File> result)
 		{
-			//mutex.WaitOne();
+			mutex.WaitOne();
 			result = null;
 			if (root != null)
             {
 				result = new List<File>();
 				root.traverse(result);
 			}
-			//mutex.ReleaseMutex();
+			mutex.ReleaseMutex();
 				
 		}
 
 		// function to search a key in this tree 
 		public File search(string key)
 		{
-			//mutex.WaitOne();
+			mutex.WaitOne();
 			File retValue = ((root == null) ? null : root.search(key));
-			//mutex.ReleaseMutex();
+			mutex.ReleaseMutex();
 			return retValue; 
 		}
 
 		// The main function that inserts a new key in this B-Tree 
 		public void insert(File key)
 		{
-			//mutex.WaitOne();
+			mutex.WaitOne();
 			// If tree is empty 
 			if (root == null)
 			{
@@ -499,7 +499,7 @@ namespace CustomFS
 			numOfFiles++;
 			totalDirectorySize += (key.isDir == false) ? key.data.Length : key.directoryContents.totalDirectorySize;
 
-			//mutex.ReleaseMutex();
+			mutex.ReleaseMutex();
 		}
 
 		public void remove(File key)
@@ -507,7 +507,7 @@ namespace CustomFS
 			if (root == null)
 				return;
 
-			//mutex.WaitOne();
+			mutex.WaitOne();
 			// Call the remove function for root 
 			if (root.remove(key) == true)
             {
@@ -527,7 +527,7 @@ namespace CustomFS
 					root = root.childNodes[0];
 
 			}
-			//mutex.ReleaseMutex();
+			mutex.ReleaseMutex();
 			return;
 		}
 	}
