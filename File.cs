@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 namespace CustomFS
 {
+	[Serializable]
     public class File
     {
 		public string name { get; private set; }

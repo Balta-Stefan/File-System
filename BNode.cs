@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 
 namespace CustomFS
 {
+	[Serializable]
 	public class BTreeNode
 	{
 		public File[] keys;  // An array of keys 
@@ -424,6 +425,7 @@ namespace CustomFS
 		}
 	}
 
+	[Serializable]
 	public class BTree
 	{
 		//contains the entire file system

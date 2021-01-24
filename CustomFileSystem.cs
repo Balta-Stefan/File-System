@@ -2,8 +2,11 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Security.AccessControl;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using DokanNet;
 
@@ -36,14 +39,34 @@ namespace CustomFS
     {
         private static readonly int capacity = 500*1024*1024; //500 MiB
         private long freeBytesAvailable = capacity;
-        private static readonly File root = new File(@"\", null, true);
+        private readonly File root;
         private readonly string drivePrefix;
         private readonly string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+        private readonly Mutex mutex = new Mutex();
 
+        public CustomFileSystem(string drivePrefix, File root)
+        {
+            this.drivePrefix = drivePrefix;
+            this.root = root;
+        }
         public CustomFileSystem(string drivePrefix)
         {
+            root = new File(@"\", null, true);
             root.absoluteParentPath = "";
             this.drivePrefix = drivePrefix;
+            File serializationFile = new File("serialize", root, true);
+            root.directoryContents.insert(serializationFile);
+            serializationFile.absoluteParentPath = @"\";
+        }
+
+        private void serializeFileSystem()
+        {
+            mutex.WaitOne();
+            IFormatter formatter = new BinaryFormatter();
+            Stream stream = new FileStream("Filesystem tree.bin", FileMode.Create, System.IO.FileAccess.Write, FileShare.None);
+            formatter.Serialize(stream, root);
+            stream.Close();
+            mutex.ReleaseMutex();
         }
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
@@ -61,9 +84,18 @@ namespace CustomFS
  
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
-            if(fileName.Contains(".pdf"))
+            if (fileName.Contains(".ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
+                return NtStatus.Success;
+            if (fileName.Equals(@"\serialize"))
             {
-                int a = 3;
+                info.IsDirectory = true;
+                serializeFileSystem();
+                return NtStatus.Success;
+            }
+            if(fileName.Contains(@"\serialize"))
+            {
+                //creating anything inside this folder isn't allowed
+                return NtStatus.Error;
             }
             //what to do with root folder (\) and with desktop.ini?
             if(fileName.Equals(@"\"))
@@ -71,9 +103,8 @@ namespace CustomFS
                 info.IsDirectory = true;
                 return NtStatus.Success;
             }
-            else if (fileName.Contains("esktop.ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
-                return NtStatus.Success;
-
+       
+            
             //when a file is first created, CreateFile will be called with mode equal to FileMode.Open
             //after that, it will be called with mode equal to FileMode.CreateNew
                 //when mode is CreateNew, info.isDirectory seems to be correct.In all other cases, it isn't.
@@ -130,6 +161,8 @@ namespace CustomFS
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
             //If fileName represents a folder, this method (or DeleteFile for files) WILL NOT be called for all of the fileName's contents.
+            if (fileName.Equals(@"\serialize"))
+                return NtStatus.Error;
 
             File directory = findFile(fileName);
 
@@ -277,6 +310,8 @@ namespace CustomFS
             else
             {
                 fileInfo = default(FileInformation);
+                if (fileName.Contains("ini"))
+                    return NtStatus.Success;
                 return NtStatus.Error;
             }
 
@@ -342,6 +377,9 @@ namespace CustomFS
         {
             if (oldName.Equals(newName))
                 return NtStatus.Success;
+            if (newName.Contains(@"\serialize"))
+                return NtStatus.Error;
+            
 
             File fileToMove = findFile(oldName);
             File newParent = findParent(newName);
@@ -389,6 +427,10 @@ namespace CustomFS
         //read file contents into the buffer
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
+            if(fileName.Contains("serialize"))
+            {
+                int a = 3;
+            }
             bytesRead = 0;
             File existingFile = findFile(fileName);
             if ((existingFile == null) || (existingFile.data == null))
@@ -526,7 +568,8 @@ namespace CustomFS
         public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
         
-        public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Error;
+        //if this returns an error, creating new files via cotnext menu will report an error
+        public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info) => NtStatus.Success;
         public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.NotImplemented;
