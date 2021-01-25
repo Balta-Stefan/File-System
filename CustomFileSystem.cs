@@ -35,6 +35,15 @@ namespace CustomFS
      * 
      * */
 
+
+    /*
+     * To do:
+     * 1)Prevent file modification.
+     * 
+     * 
+     * 
+     * */
+
     class CustomFileSystem : IDokanOperations
     {
         private static readonly int capacity = 500*1024*1024; //500 MiB
@@ -43,6 +52,7 @@ namespace CustomFS
         private readonly string drivePrefix;
         private readonly string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
         private readonly Mutex mutex = new Mutex();
+        bool preventFileModification = true;
 
         public CustomFileSystem(string drivePrefix, File root)
         {
@@ -73,7 +83,6 @@ namespace CustomFS
             //This method is called only for the file that is deleted.
             //When fileName represents a folder, this method WILL NOT be called for all of its contents.It is up to the programmer to delete all contents of the folder.
 
-            
             File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
@@ -86,10 +95,21 @@ namespace CustomFS
         {
             if (fileName.Contains(".ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
                 return NtStatus.Success;
-            if (fileName.Equals(@"\serialize"))
+            //if (fileName.Equals(@"\serialize") && access != DokanNet.FileAccess.Synchronize && access != DokanNet.FileAccess.ReadAttributes && access != DokanNet.FileAccess.GenericRead && access != (DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize) && access != DokanNet.FileAccess.ReadPermissions)
+            if(fileName.Equals(@"\serialize"))
             {
+                //there is no way to determine if a file is being opened
+
+                //ReadAttributes | Synchronize - on right click
+                //ReadPermissions - on right click
+                //GenericRead - on right click
+                //ReadAttributes - on right click
+                //Synchronize - on right click > properties
+                //ReadData | ReadAattributes | Synchronize on opening
+
                 info.IsDirectory = true;
-                serializeFileSystem();
+                if(access == (DokanNet.FileAccess.ReadData | DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize))
+                    serializeFileSystem(); //this gets activated even when the folder isn't being opened (like when checking its context menu)
                 return NtStatus.Success;
             }
             if(fileName.Contains(@"\serialize"))
@@ -103,6 +123,7 @@ namespace CustomFS
                 info.IsDirectory = true;
                 return NtStatus.Success;
             }
+
        
             
             //when a file is first created, CreateFile will be called with mode equal to FileMode.Open
@@ -162,7 +183,7 @@ namespace CustomFS
         {
             //If fileName represents a folder, this method (or DeleteFile for files) WILL NOT be called for all of the fileName's contents.
             if (fileName.Equals(@"\serialize"))
-                return NtStatus.Error;
+                return NtStatus.CannotDelete;
 
             File directory = findFile(fileName);
 
@@ -318,6 +339,22 @@ namespace CustomFS
             return NtStatus.Success;
         }
 
+        // Adds an ACL entry on the specified file for the specified account.
+        public static void AddFileSecurity(string fileName, string account,
+            FileSystemRights rights, AccessControlType controlType)
+        {
+
+            // Get a FileSecurity object that represents the
+            // current security settings.
+            FileSecurity fSecurity = System.IO.File.GetAccessControl(fileName);
+
+            // Add the FileSystemAccessRule to the security settings.
+            fSecurity.AddAccessRule(new FileSystemAccessRule(account,
+                rights, controlType));
+
+            // Set the new access settings.
+            System.IO.File.SetAccessControl(fileName, fSecurity);
+        }
         public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity security, AccessControlSections sections, IDokanFileInfo info)
         {
             //this method is probably used to set file permissions.No clue what SetFilePermissions is for then
@@ -326,6 +363,12 @@ namespace CustomFS
             //each assignment of permissions to a user or a group is represented as an ACE (Access Control Entry)
             //the entire set of permission entries in a security descriptor is known as ACL (Access Control List)
 
+            if(info.IsDirectory == false && preventFileModification == true)
+            {
+                security = new FileSecurity();
+                var abc = security.AccessRightType;
+                int a = 3;
+            }
 
             security = null;
             /*if(fileName.Equals(@"\"))
@@ -377,7 +420,7 @@ namespace CustomFS
         {
             if (oldName.Equals(newName))
                 return NtStatus.Success;
-            if (newName.Contains(@"\serialize"))
+            if (newName.Contains(@"\serialize") || oldName.Contains(@"\serialize"))
                 return NtStatus.Error;
             
 
@@ -464,10 +507,23 @@ namespace CustomFS
 
             //should be called after createFile method
 
+
             bytesWritten = 0;
             File file = findFile(fileName); //argument false means that this file already exists in the root tree
 
-            if(file == null)
+        
+            //if(preventFileModification == true && file.endOfFile != 0 && file.alreadyWritten == true)
+            if(file.alreadyWritten == true)
+            {
+                //disable file editing
+                return NtStatus.Error;
+            }
+            if (buffer.Length + offset == file.endOfFile)
+            {
+                file.alreadyWritten = true;
+            }
+
+            if (file == null)
                 return NtStatus.Error;
             
 
@@ -565,15 +621,22 @@ namespace CustomFS
             return DokanResult.FileNotFound;
         }
         public void CloseFile(string fileName, IDokanFileInfo info) { }
-        public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
+        public NtStatus LockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus Mounted(IDokanFileInfo info) => NtStatus.Success;
         
         //if this returns an error, creating new files via cotnext menu will report an error
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info) => NtStatus.Success;
-        public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info) => NtStatus.Success;
+        public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
+        {
+            //When copying a file from external drive, this method is called after createFile, but before writeFile
+            //When editing a file on the virtual drive, writeFile is called before this method.
+            File file = findFile(fileName);
+            file.endOfFile = length;
+            return NtStatus.Success;
+        }
         public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.NotImplemented;
-        public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.Error;
+        public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus Unmounted(IDokanFileInfo info) => NtStatus.Success;
     }
 }

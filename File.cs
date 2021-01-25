@@ -17,7 +17,8 @@ namespace CustomFS
 		public BTree directoryContents { get; } //used only for directories
 		public byte[] data; //null if isDir == true
 							//Permissions perms;
-		public long lengthOfFile;
+		public long endOfFile;
+		public bool alreadyWritten = false;
 
 		public File(string name, File parentDir, bool isDir)
         {
