@@ -93,6 +93,10 @@ namespace CustomFS
  
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
         {
+            if (fileName.Contains("txt"))
+            {
+                access = DokanNet.FileAccess.None;
+            }
             if (fileName.Contains(".ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
                 return NtStatus.Success;
             //if (fileName.Equals(@"\serialize") && access != DokanNet.FileAccess.Synchronize && access != DokanNet.FileAccess.ReadAttributes && access != DokanNet.FileAccess.GenericRead && access != (DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize) && access != DokanNet.FileAccess.ReadPermissions)
@@ -363,6 +367,7 @@ namespace CustomFS
             //each assignment of permissions to a user or a group is represented as an ACE (Access Control Entry)
             //the entire set of permission entries in a security descriptor is known as ACL (Access Control List)
 
+  
             if(info.IsDirectory == false && preventFileModification == true)
             {
                 security = new FileSecurity();
@@ -511,6 +516,8 @@ namespace CustomFS
             bytesWritten = 0;
             File file = findFile(fileName); //argument false means that this file already exists in the root tree
 
+            if (file == null)
+                return DokanResult.FileNotFound;
         
             //if(preventFileModification == true && file.endOfFile != 0 && file.alreadyWritten == true)
             if(file.alreadyWritten == true)
@@ -519,12 +526,8 @@ namespace CustomFS
                 return NtStatus.Error;
             }
             if (buffer.Length + offset == file.endOfFile)
-            {
                 file.alreadyWritten = true;
-            }
 
-            if (file == null)
-                return NtStatus.Error;
             
 
             if ((file.data != null) && (offset > file.data.Length))
@@ -604,6 +607,8 @@ namespace CustomFS
             }*/
 
             // TODO: Update date modified.
+            if (file.endOfFile == 0)
+                file.alreadyWritten = true;
             return NtStatus.Success;
         }
 
