@@ -1,0 +1,51 @@
+-https://stackoverflow.com/questions/5869922/c-sharp-encrypt-serialized-file-before-writing-to-disk
+	-enkripcija objekata
+	
+-https://docs.microsoft.com/en-us/dotnet/api/system.security.cryptography.rijndaelmanaged?view=net-5.0
+	-C# kripto klase
+	
+-https://stackoverflow.com/questions/10168240/encrypting-decrypting-a-string-in-c-sharp
+
+
+-C# kripto biblioteke:
+	-libsodium
+	-securitydriven inferno
+	-bouncy castle
+		-https://bouncycastle.org/specifications.html
+		-https://people.eecs.berkeley.edu/~jonah/bc/org/bouncycastle/crypto/BufferedBlockCipher.html#processBytes(byte[],%20int,%20int,%20byte[],%20int)
+		-https://dev.to/leeclarke/file-stream-encryption-with-bouncy-castle-2ee3
+		-https://stackoverflow.com/questions/32672241/using-bouncycastles-chacha-for-file-encryption
+		-http://docjar.org/docs/api/org/bouncycastle/ - documentation
+		-https://github.com/bcgit/bc-csharp/tree/master/crypto/src/crypto/engines - source code
+		-https://stackoverflow.com/questions/17800117/how-to-generate-a-symmetric-key-with-bouncy-castle - key generation
+		-https://www.blackberry.com/developers/docs/7.1.0api/net/rim/device/api/crypto/AbstractDigest.html#update(byte[],%20int,%20int) - bouncy castle Blackberry docs
+		
+		
+		
+-bouncy castle:
+	-if CBCblockCipher doesn't receive an IV, it will be all zeroes
+	-Crypto.Generators contains key derivation functions
+	
+	
+-ideja:
+	-staviti byte[] encryptedData u klasu File 
+	-kada je fajl potrebno dekriptovati, potrebno je dekriptovati sadrzaj tog niza i postaviti referencu na taj fajl na objekat klase File koji se dobije dekripcijom.
+		-niz encryptedData postaviti na null 
+		
+	-kada bude bilo potrebno serijalizovati fajl sistem, mora se enkriptovati sve sto je dekriptovano.Ako je encryptedData jednak null, vrsi se enkripcija sadrzaja fajla. 
+	 Ako se radi o folderu, vrsi se enkripcija njegovog sadrzaja sto ukljucuje i podfoldere.Enkripcija podfoldera se vrsi dok se ne naidje na encryptedData koji nije null.
+	 
+	-potrebno je sljedece:
+		-korisnicko ime 
+		-prijavna lozinka
+		-certifikat
+		
+		
+	-kod enkripcije fajlova, potrebno je svaki put koristiti novi IV (i potrebno ga je cuvati unutar File klase)
+	
+	-NAJBOLJE BI BILO KORISTITI AEAD (Authenticated Encryption with Associated Data)
+	
+	
+	-C# - koristiti SecureString za sifru.
+		-http://bartdesmet.net/blogs/bart/archive/2006/03/31/3851.aspx
+	
