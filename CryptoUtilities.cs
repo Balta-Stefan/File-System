@@ -5,6 +5,7 @@ using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Crypto.Digests;
+using Org.BouncyCastle.Crypto.Generators;
 
 
 namespace CustomFS
@@ -12,6 +13,8 @@ namespace CustomFS
     public class CryptoUtilities
     {
         private static SecureRandom random = new SecureRandom();
+        //private byte[] encryptionKey; //Encryption key will be derived from the user's password.This key will be used for filesystem encryption.
+        //private byte[] MAC_key; //MAC key will also be derived form user's password.
 
         public static void getRandomData(byte[] toFill)
         {
@@ -40,7 +43,7 @@ namespace CustomFS
             {
                 cipher.DoFinal(cipherText, outputLen);
             }
-            catch (CryptoException ce)
+            catch (CryptoException)
             {
                 return null;
             }
@@ -64,7 +67,7 @@ namespace CustomFS
             {
                 cipher.DoFinal(workData, outputLen);
             }
-            catch (CryptoException ce)
+            catch (CryptoException)
             {
                 return null;
             }
@@ -89,7 +92,7 @@ namespace CustomFS
             {
                 cipher.DoFinal(cipherText, outputLen);
             }
-            catch (CryptoException ce)
+            catch (CryptoException)
             {
                 return null;
             }
@@ -97,9 +100,8 @@ namespace CustomFS
             return cipherText;
         }
 
-        public static byte[] SHA2_256_hasher(byte[] data, byte[] salt)
+        private static byte[] hasher(byte[] data, byte[] salt, IDigest hashFunction)
         {
-            Sha256Digest hashFunction = new Sha256Digest();
             byte[] hashed = new byte[hashFunction.GetDigestSize()];
 
             hashFunction.BlockUpdate(salt, 0, salt.Length);
@@ -107,31 +109,50 @@ namespace CustomFS
             hashFunction.DoFinal(hashed, 0);
 
             return hashed;
+        }
+
+        public static byte[] SHA2_256_hasher(byte[] data, byte[] salt)
+        {
+            Sha256Digest hashFunction = new Sha256Digest();
+            return hasher(data, salt, hashFunction);
         }
 
         public static byte[] SHA2_512_hasher(byte[] data, byte[] salt)
         {
             Sha512Digest hashFunction = new Sha512Digest();
-            byte[] hashed = new byte[hashFunction.GetDigestSize()];
-
-            hashFunction.BlockUpdate(salt, 0, salt.Length);
-            hashFunction.BlockUpdate(data, 0, data.Length);
-            hashFunction.DoFinal(hashed, 0);
-
-            return hashed;
+            return hasher(data, salt, hashFunction);
         }
 
         public static byte[] SHA3_256_hasher(byte[] data, byte[] salt)
         {
             Sha3Digest hashFunction = new Sha3Digest();
-            byte[] hashed = new byte[hashFunction.GetDigestSize()];
-
-            hashFunction.BlockUpdate(salt, 0, salt.Length);
-            hashFunction.BlockUpdate(data, 0, data.Length);
-            hashFunction.DoFinal(hashed, 0);
-
-            return hashed;
+            return hasher(data, salt, hashFunction);
         }
 
+        public static byte[] Blake2b_hasher(byte[] data, byte[] salt) //512 bit hash
+        {
+            Blake2bDigest hashFunction = new Blake2bDigest();
+            return hasher(data, salt, hashFunction);
+        }
+
+        public static byte[] scryptKeyDerivation(byte[] data, byte[] salt, int derivedKeyLength)
+        {
+            //SCrypt.Generate(password, passData.salt, iterationCount, blockSize, paralelismFactor, passData.hashed_password_with_salt.Length);
+
+            int iterationCount = 16384; // must be a power of two
+            int blockSize = 8;
+            int paralelismFactor = 1; // number of threads used?
+
+            return SCrypt.Generate(data, salt, iterationCount, blockSize, paralelismFactor, derivedKeyLength);
+        }
+        /*public static byte[] sign_ECDSA(byte[] data, AsymmetricKeyParameter key)
+        {
+
+        }*/
+
+        /*public static byte[] derivePassword()
+        {
+
+        }*/
     }
 }
