@@ -23,6 +23,8 @@ using static CustomFS.CryptoUtilities;
 namespace CustomFS
 {
     enum hashAlgorithm { first, second};
+
+    [Serializable]
     class hashedPassword
     {
         public readonly byte[] salt = new byte[16]; // arbitrarily chosen salt size
@@ -124,7 +126,7 @@ namespace CustomFS
                 byte[] passwordHash = CryptoUtilities.scryptKeyDerivation(password, passData.salt, passData.hashed_password_with_salt.Length);
 
                 // check if the two derived keys are equal
-                returnValue = compareByteArrays(password, passwordHash);
+                returnValue = compareByteArrays(passwordHash, passData.hashed_password_with_salt);
             }
 
             // delete the password
@@ -283,7 +285,14 @@ namespace CustomFS
 
         private void serializeUserDatabase()
         {
-            // to do
+            System.IO.Stream ms = System.IO.File.OpenWrite(userDatabaseFilename);
+
+            BinaryFormatter formatter = new BinaryFormatter();
+            //It serialize the employee object  
+            formatter.Serialize(ms, database);
+            ms.Flush();
+            ms.Close();
+            ms.Dispose();
         }
         private void deserializeDatabase() // call on program startup
         {
@@ -292,7 +301,7 @@ namespace CustomFS
             Stream stream = null;
             try
             {
-                IFormatter formatter = new BinaryFormatter();
+                BinaryFormatter formatter = new BinaryFormatter();
                 stream = new FileStream(userDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read);
                 database = (Dictionary<string, hashedPassword>)formatter.Deserialize(stream);
                 stream.Close();
@@ -330,10 +339,9 @@ namespace CustomFS
             Program obj = new Program();
             obj.deserializeDatabase(); // call on startup every time
             //obj.inputPassword();
-
-            obj.registerUser();
-
-
+            //obj.registerUser();
+            
+           
 
             /*
             byte[] data = Encoding.UTF8.GetBytes("my longest message that will be entered in this example");
