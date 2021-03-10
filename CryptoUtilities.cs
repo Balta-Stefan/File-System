@@ -6,12 +6,19 @@ using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Generators;
-
+using Org.BouncyCastle.Asn1.X509;
+using Org.BouncyCastle.Pkcs;
+using System.Text;
+using Org.BouncyCastle.OpenSsl;
+using System.IO;
 
 namespace CustomFS
 {
     public class CryptoUtilities
     {
+        public enum integrityHashAlgorithm { SHA2_256, SHA2_512, SHA3_256, BLAKE2b_512 }
+        public enum encryptionAlgorithms { AES, ChaCha, ThreeFish }
+
         private static SecureRandom random = new SecureRandom();
         //private byte[] encryptionKey; //Encryption key will be derived from the user's password.This key will be used for filesystem encryption.
         //private byte[] MAC_key; //MAC key will also be derived form user's password.
@@ -135,6 +142,30 @@ namespace CustomFS
             return hasher(data, salt, hashFunction);
         }
 
+        public static void generateCSR(AsymmetricCipherKeyPair keyPair, string commonName, string organizationName, string organizationUnit, string state, string country)
+        {
+            string subjectName = "CN=" + commonName + ", O=" + organizationName + ", OU=" + organizationUnit + ", ST=" + state + ", C=" + country
+;            X509Name subject = new X509Name(subjectName);
+            Pkcs10CertificationRequest csr = new Pkcs10CertificationRequest("SHA1WITHRSA", subject, keyPair.Public, null, keyPair.Private); // this requires a private key which will be used to sign the request.
+            //https://stackoverflow.com/questions/2953088/create-a-csr-in-c-sharp-using-an-explicit-rsa-key-pair
+
+            dumpToPEM(csr, "client.csr");
+        }
+
+        public static void dumpToPEM(object toDump, string fileName)
+        {
+            StringBuilder CSRPem = new StringBuilder();
+            PemWriter CSRPemWriter = new PemWriter(new StringWriter(CSRPem));
+            CSRPemWriter.WriteObject(toDump);
+            CSRPemWriter.Writer.Flush();
+
+            string CSRtext = CSRPem.ToString();
+
+            using (StreamWriter f = new StreamWriter(fileName))
+            {
+                f.Write(CSRtext);
+            }
+        }
         public static byte[] scryptKeyDerivation(byte[] data, byte[] salt, int derivedKeyLength)
         {
             //SCrypt.Generate(password, passData.salt, iterationCount, blockSize, paralelismFactor, passData.hashed_password_with_salt.Length);

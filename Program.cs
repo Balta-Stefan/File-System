@@ -9,32 +9,52 @@ using System.Security;
 using System.Text;
 using System.Threading.Tasks;
 using DokanNet;
+using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
+using Org.BouncyCastle.OpenSsl;
+using Org.BouncyCastle.Pkcs;
+using Org.BouncyCastle.Security;
+using static CustomFS.CryptoUtilities;
 
 namespace CustomFS
 {
     enum hashAlgorithm { first, second};
     class hashedPassword
     {
-        public hashedPassword(byte[] password, integrityHashAlgorithm hashingAlgorithm)
+        public readonly byte[] salt = new byte[16]; // arbitrarily chosen salt size
+        public readonly byte[] hashed_password_with_salt = null;
+        public readonly integrityHashAlgorithm hashingAlgorithm = integrityHashAlgorithm.SHA3_256;
+        public readonly encryptionAlgorithms encryptionAlgorithm = encryptionAlgorithms.AES;
+
+        public static readonly int hashSize = 32; // 256 bits   
+
+        public hashedPassword(byte[] password, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm)
         {
             this.hashingAlgorithm = hashingAlgorithm;
+            this.encryptionAlgorithm = encryptionAlgorithm;
             // generate a salt
             CryptoUtilities.getRandomData(salt);
             // pass the password and salt through Scrypt key derivation function
             hashed_password_with_salt = CryptoUtilities.scryptKeyDerivation(password, salt, hashSize);
         }
 
-        public readonly byte[] salt = new byte[16]; // arbitrary salt size
-        public readonly byte[] hashed_password_with_salt = null;
-        public readonly integrityHashAlgorithm hashingAlgorithm = integrityHashAlgorithm.SHA3_256;
+        public override string ToString()
+        {
+            string saltStr = string.Empty;
+            string passwordHash = string.Empty;
 
-        public static readonly int hashSize = 32; // 256 bits
-        public enum integrityHashAlgorithm { SHA2_256, SHA2_512, SHA3_256, BLAKE2b_512}
+            foreach (byte b in salt)
+                saltStr += (char)b;
+            foreach (byte b in hashed_password_with_salt)
+                passwordHash += (char)b;
+
+            return "Salt: " + saltStr + "\nPassword hash: " + passwordHash + "\nIntegrity: " + hashingAlgorithm + "\nEncryption algorithm: " + encryptionAlgorithm;
+        }
+
     }
     class Program
     {
@@ -57,8 +77,11 @@ namespace CustomFS
 
                 if((int)key.Key == 8) // backspace
                 {
-                    passwordLength--;
-                    Console.Write("\b \b");
+                    if(passwordLength > 0)
+                    {
+                        passwordLength--;
+                        Console.Write("\b \b");
+                    }
                 }
                 else if (((int)key.Key) >= 32 && ((int)key.Key <= 126))
                 {
@@ -111,7 +134,40 @@ namespace CustomFS
 
             return returnValue;
         }
+        /// <summary>
+        /// Takes an array of values and asks the user to choose one.
+        /// </summary>
+        /// <param name="enumValues"></param>
+        /// <returns>Index of the chosen value</returns>
+        private int chooseAlgorithm(string[] enumValues)
+        {
+            int counter = 1;
 
+            foreach (string s in enumValues)
+            {
+                Console.WriteLine(counter++ + ")" + s);
+            }
+
+            Console.WriteLine("Which hashing algorithm to use for file integrity validation?");
+            while (true)
+            {
+                string input = Console.ReadLine();
+                try
+                {
+                    int number = Int32.Parse(input);
+                    if (number > 0 && number <= enumValues.Length) // indexes start from 1 (that's why counter is initialized to 1)
+                    {
+                        return number - 1;
+                    }
+                    else
+                        Console.WriteLine("No such index!");
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine("Incorrect input!");
+                }
+            }
+        }
         public void registerUser()
         {
             string userName;
@@ -145,54 +201,83 @@ namespace CustomFS
                 }
             }
 
-            hashedPassword.integrityHashAlgorithm hashAlgorithm = hashedPassword.integrityHashAlgorithm.SHA3_256;
-            string[] enumValues = Enum.GetNames(typeof(hashedPassword.integrityHashAlgorithm));
-            int counter = 1;
+            string[] hashEnumValues = Enum.GetNames(typeof(integrityHashAlgorithm));
+            integrityHashAlgorithm hashAlgorithm = (integrityHashAlgorithm)Enum.Parse(typeof(integrityHashAlgorithm), hashEnumValues[chooseAlgorithm(hashEnumValues)]);
 
-            foreach(string s in enumValues)
-            {
-                Console.WriteLine(counter++ + ")" + s);
-            }
+            string[] encryptionAlgorithmsEnumValues = Enum.GetNames(typeof(encryptionAlgorithms));
+            encryptionAlgorithms encryptionAlgorithm = (encryptionAlgorithms)Enum.Parse(typeof(encryptionAlgorithms), encryptionAlgorithmsEnumValues[chooseAlgorithm(encryptionAlgorithmsEnumValues)]);
+            
+            hashedPassword passwordData = new hashedPassword(pass, hashAlgorithm, encryptionAlgorithm);
+         
 
-            Console.WriteLine("Which hashing algorithm to use for file integrity validation?");
-            while(true)
-            {
-                string input = Console.ReadLine();
-                try
-                {
-                    int number = Int32.Parse(input);
-                    if (number > 0 && number <= enumValues.Length) // indexes start from 1 (that's why counter is initialized to 1)
-                    {
-                        hashAlgorithm = (hashedPassword.integrityHashAlgorithm)Enum.Parse(typeof(hashedPassword.integrityHashAlgorithm), enumValues[number - 1]);
-                        break;
-                    }
-                    else
-                        Console.WriteLine("No such index!");
-                }catch(FormatException)
-                {
-                    Console.WriteLine("Incorrect input!");
-                }
-            } 
-
-            hashedPassword passwordData = new hashedPassword(pass, hashAlgorithm);
-          
             // delete the password
             for (int i = 0; i < pass.Length; i++)
                 pass[i] = 0;
             pass = null;
 
 
-            // handle the digital certificate
-                // the user supplies a filename that contains an RSA public key.The rest will be entered manually.That certificate has to be signed programatically.
-                // in the future, add support for eliptic curve cryptography
+            // create the digital certificate
+            // The user must supply a filename that contains his private key in PEM format.
+            // in the future, add support for eliptic curve cryptography.
+
+            AsymmetricCipherKeyPair privateKey = null;
+            // obtain the key file
+            while (true)
+            {
+                Console.WriteLine("Enter the name of the file that contains RSA private key in PEM format.");
+                string privateKeyFilename = Console.ReadLine();
+
+                // check if the file exists
+                if (System.IO.File.Exists(privateKeyFilename) == false)
+                {
+                    Console.WriteLine("Given file doesn't exist.Put it into the directory where exe is located");
+                    continue;
+                }
+
+                // handle the private key
+                var fileStream = System.IO.File.OpenText(privateKeyFilename);
+                PemReader reader = new PemReader(fileStream);
+                try
+                {
+                    privateKey = (AsymmetricCipherKeyPair)reader.ReadObject();
+                }
+                catch(Exception)
+                {
+                    Console.WriteLine("Error reading the given private key.");
+                    continue;
+                }
+                fileStream.Close();
+                
+                /*if(privateKey is RsaKeyParameters == false)
+                {
+                    Console.WriteLine("Given key isn't an RSA key");
+                    continue;
+                }*/
+                // what happens if the user supplies a public RSA key, instead of the private one?
                 // to do
+                break;
+            }
 
+            //var publicKey = new RsaKeyParameters(false, ((RsaPrivateCrtKeyParameters)privateKey).Modulus, ((RsaPrivateCrtKeyParameters)privateKey).PublicExponent);
+            //AsymmetricCipherKeyPair keyPair = new AsymmetricCipherKeyPair(publicKey, privateKey);
 
-            // ask the user which hashing algorithm shall be used for file integrity
-            
+            // create the certificate request using the keys.The request will be manually signed on the back end.
+            Console.WriteLine("Enter common name: ");
+            string commonName = Console.ReadLine();
+            Console.WriteLine("Enter organization name: ");
+            string organizationName = Console.ReadLine();
+            Console.WriteLine("Enter organization unit: ");
+            string organizationUnit = Console.ReadLine();
+            Console.WriteLine("Enter state: ");
+            string state = Console.ReadLine();
+            Console.WriteLine("Enter country: ");
+            string country = Console.ReadLine();
 
+            CryptoUtilities.generateCSR(privateKey, commonName, organizationName, organizationUnit, state, country);
 
             // do after successfully performing a registration
+           
+            database.Add(userName, passwordData);
             serializeUserDatabase();
         }
 
@@ -244,10 +329,11 @@ namespace CustomFS
         {
             Program obj = new Program();
             obj.deserializeDatabase(); // call on startup every time
-            obj.inputPassword();
+            //obj.inputPassword();
 
-            
-        
+            obj.registerUser();
+
+
 
             /*
             byte[] data = Encoding.UTF8.GetBytes("my longest message that will be entered in this example");
