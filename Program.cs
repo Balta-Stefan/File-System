@@ -150,6 +150,12 @@ namespace CustomFS
             Console.WriteLine("Input the name of the certificate in PEM format:");
             string certFilename = Console.ReadLine();
 
+            if(certFilename.Equals(CAfile))
+            {
+                Console.WriteLine("Can't use CA's own certificate!");
+                return false;
+            }
+
             // check if the file exists
             if (System.IO.File.Exists(certFilename) == false)
             {
@@ -191,15 +197,21 @@ namespace CustomFS
                 
                 try
                 {
-                    certificate.Verify(certificate.GetPublicKey());
+                    // WARNING: VERIFYING A CERTIFICATE BY ITS OWN PUBLIC KEY WILL STILL PASS
+                    certificate.Verify(rootCert.GetPublicKey());
                 }
-                catch(Exception)
+                catch(InvalidKeyException)
                 {
                     Console.WriteLine("Given certificate not signed by certificate authority");
                     return false;
                 }
+                catch(Exception)
+                {
+                    Console.WriteLine("Error verifying the given certificate");
+                    return false;
+                }
 
-                Console.WriteLine(certificate);
+                //Console.WriteLine(certificate);
             }
 
             return true;
