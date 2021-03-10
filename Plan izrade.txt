@@ -70,8 +70,6 @@
 			-alternativa je HMAC
 		-potrebno je heshirati sifre.
 		-potrebno je izvesti kljuc za enkripciju i kljuc za MAC od lozinke za prijavu.
-			-posto ce biti potrebno cuvati ove sifre sve dok korisnik ne zatvori program, potrebno je cuvati ove sifre u SecureString
-			-sta ce mi privatni kljuc ako koristim MAC?
 		-sve sto se enkriptuje sa RSA-om mora koristiti OAEP, a sve sto se potpisuje sa RSA mora koristiti PSS!
 		-digitalno potpisivanje sa eliptickim krivama: ECDSA
 		
