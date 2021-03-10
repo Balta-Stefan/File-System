@@ -11,7 +11,7 @@
 	-libsodium
 	-securitydriven inferno
 	-bouncy castle
-		-https://bouncycastle.org/specifications.html
+		-https://bouncycastle.org/specifications.html - lista stvari koje bouncy castle podrzava
 		-https://people.eecs.berkeley.edu/~jonah/bc/org/bouncycastle/crypto/BufferedBlockCipher.html#processBytes(byte[],%20int,%20int,%20byte[],%20int)
 		-https://dev.to/leeclarke/file-stream-encryption-with-bouncy-castle-2ee3
 		-https://stackoverflow.com/questions/32672241/using-bouncycastles-chacha-for-file-encryption
@@ -19,33 +19,65 @@
 		-https://github.com/bcgit/bc-csharp/tree/master/crypto/src/crypto/engines - source code
 		-https://stackoverflow.com/questions/17800117/how-to-generate-a-symmetric-key-with-bouncy-castle - key generation
 		-https://www.blackberry.com/developers/docs/7.1.0api/net/rim/device/api/crypto/AbstractDigest.html#update(byte[],%20int,%20int) - bouncy castle Blackberry docs
+		-https://www.bouncycastle.org/docs/pkixdocs1.4/overview-summary.html - API referenca
+		-https://www.bouncycastle.org/docs/docs1.5on/index.html - API referenca
 		
-		
+	-koristiti klasu X509Certificate2 za rukovanje certifikatima (dio C#-a, nema veze sa Bouncy castle-om)
+		-https://docs.microsoft.com/en-us/dotnet/api/system.security.cryptography.x509certificates.x509certificate2?view=net-5.0
+	
 		
 -bouncy castle:
 	-if CBCblockCipher doesn't receive an IV, it will be all zeroes
 	-Crypto.Generators contains key derivation functions
+	-https://github.com/bcgit/bc-java/wiki/BC-%22Version-2%22---The-post-BC-1.46-changes#verifying-a-signature - potvrda potpisa
+	-https://gist.github.com/tmarkovski/9fc008fc034511bbbee93a5c4cd1a99a - generate eliptic curve key pair
 	
 	
 -ideja:
+	-sam pkcs12 format certifikata moze sadrzati privatni kljuc (onda je certifikat zasticen sifrom)
+	
+	-za svaku enkripciju koristiti novi IV (cak i ako se npr. mijenja postojeci fajl).Ovo je zbog dodatne sigurnosti...
+
 	-staviti byte[] encryptedData u klasu File 
-	-kada je fajl potrebno dekriptovati, potrebno je dekriptovati sadrzaj tog niza i postaviti referencu na taj fajl na objekat klase File koji se dobije dekripcijom.
+	-kada je fajl potrebno dekriptovati, potrebno je dekriptovati sadrzaj tog niza i postaviti referencu na taj fajl (koja se nalazi u BNode) na objekat klase File koji se dobije dekripcijom.
 		-niz encryptedData postaviti na null 
 		
 	-kada bude bilo potrebno serijalizovati fajl sistem, mora se enkriptovati sve sto je dekriptovano.Ako je encryptedData jednak null, vrsi se enkripcija sadrzaja fajla. 
-	 Ako se radi o folderu, vrsi se enkripcija njegovog sadrzaja sto ukljucuje i podfoldere.Enkripcija podfoldera se vrsi dok se ne naidje na encryptedData koji nije null.
+	 Ako se radi o folderu, vrsi se enkripcija njegovog sadrzaja.
+	 Enkripcija podfoldera se vrsi dok se ne naidje na encryptedData koji nije null.
 	 
 	-potrebno je sljedece:
 		-korisnicko ime 
 		-prijavna lozinka
 		-certifikat
 		
-		
-	-kod enkripcije fajlova, potrebno je svaki put koristiti novi IV (i potrebno ga je cuvati unutar File klase)
+	
+	-enkripcija fajlova:	
+		-koristiti PBE klase (Password Based Encryption)
+		-potrebno je svaki put koristiti novi IV (i potrebno ga je cuvati unutar File klase)
 	
 	-NAJBOLJE BI BILO KORISTITI AEAD (Authenticated Encryption with Associated Data)
 	
 	
 	-C# - koristiti SecureString za sifru.
 		-http://bartdesmet.net/blogs/bart/archive/2006/03/31/3851.aspx
+		
 	
+	-to do:
+		-bolje je koristiti elipticke krive (od asimetricnih kripto algoritama, bice potrebno samo potpisati hasheve fajlova preko privatnog kljuca).
+		-potrebno je digitalno potpisati svaki fajl i folder.To se radi tako sto se File objekat hashira i onda taj hash potpise privatnim kljucem.
+			-provjeriti crypto/signers
+			-alternativa je HMAC
+		-potrebno je heshirati sifre.
+		-potrebno je izvesti kljuc za enkripciju i kljuc za MAC od lozinke za prijavu.
+			-posto ce biti potrebno cuvati ove sifre sve dok korisnik ne zatvori program, potrebno je cuvati ove sifre u SecureString
+			-sta ce mi privatni kljuc ako koristim MAC?
+		-sve sto se enkriptuje sa RSA-om mora koristiti OAEP, a sve sto se potpisuje sa RSA mora koristiti PSS!
+		-digitalno potpisivanje sa eliptickim krivama: ECDSA
+		
+		-koristiti OpenSSL/PEMReader klasu iz Bouncy castle-a za citanje PEM fajlova
+		
+		-kod registracije korisnickog naloga, samo generisati zahtjev za certifikatom, a onda ga rucno potpisati na back end-u
+		
+		-kod validacije integriteta, koristiti privatni kljuc korisnika umjesto MAC funkcija.
+		
