@@ -18,6 +18,7 @@ using Org.BouncyCastle.Math;
 using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.Pkcs;
 using Org.BouncyCastle.Security;
+using Org.BouncyCastle.X509;
 using static CustomFS.CryptoUtilities;
 
 namespace CustomFS
@@ -29,10 +30,12 @@ namespace CustomFS
     {
         public readonly byte[] salt = new byte[16]; // arbitrarily chosen salt size
         public readonly byte[] hashed_password_with_salt = null;
+        public readonly byte[] encryptionKeyIV; // used in key derivation
         public readonly integrityHashAlgorithm hashingAlgorithm = integrityHashAlgorithm.SHA3_256;
         public readonly encryptionAlgorithms encryptionAlgorithm = encryptionAlgorithms.AES;
 
         public static readonly int hashSize = 32; // 256 bits   
+        public static readonly short keySize = 32; // 256 bit key size will be used for all algorithms
 
         public hashedPassword(byte[] password, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm)
         {
@@ -42,6 +45,9 @@ namespace CustomFS
             CryptoUtilities.getRandomData(salt);
             // pass the password and salt through Scrypt key derivation function
             hashed_password_with_salt = CryptoUtilities.scryptKeyDerivation(password, salt, hashSize);
+
+            encryptionKeyIV = new byte[16];
+            CryptoUtilities.getRandomData(encryptionKeyIV);
         }
 
         public override string ToString()
@@ -62,6 +68,10 @@ namespace CustomFS
     {
         private string userDatabaseFilename = "User database.bin";
         private Dictionary<string, hashedPassword> database = null;
+
+        private byte[] encryptionKey;
+
+        private static readonly string CAfile = "CA.pem";
 
         byte[] inputPassword()
         {
@@ -113,7 +123,6 @@ namespace CustomFS
 
         public bool login()
         {
-            bool returnValue = false;
             Console.WriteLine("Username:");
             string username = Console.ReadLine();
             byte[] password = inputPassword();
@@ -121,20 +130,79 @@ namespace CustomFS
             hashedPassword passData;
 
             // check the database
-            if (database.TryGetValue(username, out passData))
+            if (database.TryGetValue(username, out passData) == true)
             {
                 byte[] passwordHash = CryptoUtilities.scryptKeyDerivation(password, passData.salt, passData.hashed_password_with_salt.Length);
 
                 // check if the two derived keys are equal
-                returnValue = compareByteArrays(passwordHash, passData.hashed_password_with_salt);
+                if (compareByteArrays(passwordHash, passData.hashed_password_with_salt) == false)
+                    return false;
+            }
+            else
+                return false;
+
+            encryptionKey = scryptKeyDerivation(password, passData.encryptionKeyIV, hashedPassword.keySize); // derive the key for encryption 
+
+            Array.Clear(password, 0, password.Length);
+
+            // handle the client certificate
+
+            Console.WriteLine("Input the name of the certificate in PEM format:");
+            string certFilename = Console.ReadLine();
+
+            // check if the file exists
+            if (System.IO.File.Exists(certFilename) == false)
+            {
+                Console.WriteLine("Given file doesn't exist.Put it into the directory where exe is located");
+                return false;
+            }
+            else
+            {
+                X509Certificate certificate = null;
+
+                var fileStream = System.IO.File.OpenText(certFilename);
+                PemReader reader = new PemReader(fileStream);
+                try
+                {
+                    certificate = (X509Certificate)reader.ReadObject();
+                }
+                catch (Exception)
+                {
+                    Console.WriteLine("Error reading the given certificate file.");
+                    fileStream.Close();
+                    return false;
+                }
+
+                // validate the certificate 
+
+                X509Certificate rootCert = null;
+                fileStream = System.IO.File.OpenText(CAfile);
+                reader = new PemReader(fileStream);
+                try
+                {
+                    rootCert = (X509Certificate)reader.ReadObject();
+                }
+                catch(Exception)
+                {
+                    Console.WriteLine("Error reading CA certificate.");
+                    fileStream.Close();
+                    return false;
+                }
+                
+                try
+                {
+                    certificate.Verify(certificate.GetPublicKey());
+                }
+                catch(Exception)
+                {
+                    Console.WriteLine("Given certificate not signed by certificate authority");
+                    return false;
+                }
+
+                Console.WriteLine(certificate);
             }
 
-            // delete the password
-            for (int i = 0; i < password.Length; i++)
-                password[i] = 0;
-            password = null;
-
-            return returnValue;
+            return true;
         }
         /// <summary>
         /// Takes an array of values and asks the user to choose one.
@@ -285,14 +353,21 @@ namespace CustomFS
 
         private void serializeUserDatabase()
         {
-            System.IO.Stream ms = System.IO.File.OpenWrite(userDatabaseFilename);
+            try
+            {
+                System.IO.Stream ms = System.IO.File.OpenWrite(userDatabaseFilename);
 
-            BinaryFormatter formatter = new BinaryFormatter();
-            //It serialize the employee object  
-            formatter.Serialize(ms, database);
-            ms.Flush();
-            ms.Close();
-            ms.Dispose();
+                BinaryFormatter formatter = new BinaryFormatter();
+                //It serialize the employee object  
+                formatter.Serialize(ms, database);
+                ms.Flush();
+                ms.Close();
+                ms.Dispose();
+            }
+           catch(Exception e)
+            {
+                Console.WriteLine("Error during user database serialization" + e);
+            }
         }
         private void deserializeDatabase() // call on program startup
         {
@@ -338,11 +413,11 @@ namespace CustomFS
         {
             Program obj = new Program();
             obj.deserializeDatabase(); // call on startup every time
-            //obj.inputPassword();
-            //obj.registerUser();
             
-           
+            //obj.registerUser();
+            obj.login();
 
+            int a = 3;
             /*
             byte[] data = Encoding.UTF8.GetBytes("my longest message that will be entered in this example");
             byte[] key = Encoding.UTF8.GetBytes("a key that unlocks doors will 12");
