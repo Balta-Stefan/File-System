@@ -61,12 +61,12 @@ namespace CustomFS
         }
         public CustomFileSystem(string drivePrefix)
         {
-            root = new File(@"\", null, true);
-            root.absoluteParentPath = "";
+            root = new File(@"\", null, true, DateTime.Now);
+            root.metadata.absoluteParentPath = "";
             this.drivePrefix = drivePrefix;
-            File serializationFile = new File("serialize", root, true);
+            File serializationFile = new File("serialize", root, true, DateTime.Now);
             root.directoryContents.insert(serializationFile);
-            serializationFile.absoluteParentPath = @"\";
+            serializationFile.metadata.absoluteParentPath = @"\";
         }
 
         private void serializeFileSystem()
@@ -86,7 +86,7 @@ namespace CustomFS
             File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
-                freeBytesAvailable += (wantedFile.isDir == true) ? wantedFile.directoryContents.totalDirectorySize : wantedFile.data.Length;
+                freeBytesAvailable += (wantedFile.metadata.isDir == true) ? wantedFile.directoryContents.totalDirectorySize : wantedFile.metadata.data.Length;
                 wantedFile.parentDir.directoryContents.remove(wantedFile);
             }
         }
@@ -148,7 +148,7 @@ namespace CustomFS
 
 
 
-            bool fileIsDirectory = (existing == null) ? false : existing.isDir;
+            bool fileIsDirectory = (existing == null) ? false : existing.metadata.isDir;
 
             if (attributes == FileAttributes.Directory || info.IsDirectory == true || fileIsDirectory)
             {
@@ -156,11 +156,10 @@ namespace CustomFS
                 switch(mode)
                 {
                     case FileMode.CreateNew:
-                        File newFolder = new File(Path.GetFileName(fileName), parent, true);
-                        string parentName = (parent.name.Equals(@"\")) ? "" : parent.name;
-                        newFolder.absoluteParentPath = parent.absoluteParentPath + @"\" + parentName;
+                        File newFolder = new File(Path.GetFileName(fileName), parent, true, DateTime.Now);
+                        string parentName = (parent.metadata.name.Equals(@"\")) ? "" : parent.metadata.name;
+                        newFolder.metadata.absoluteParentPath = parent.metadata.absoluteParentPath + @"\" + parentName;
                         parent.directoryContents.insert(newFolder);
-                        newFolder.dateCreated = DateTime.Now;
                         break;
                 }
             }
@@ -172,10 +171,9 @@ namespace CustomFS
                 {
                     case FileMode.CreateNew:
                         //create file
-                        File newFile = new File(Path.GetFileName(fileName), parent, false);
+                        File newFile = new File(Path.GetFileName(fileName), parent, false, DateTime.Now);
                         //newFile.absoluteParentPath = parent.absoluteParentPath + @"\" + parent.name;
                         parent.directoryContents.insert(newFile);
-                        newFile.dateCreated = DateTime.Now;
                         break;
                 }
             }
@@ -191,7 +189,7 @@ namespace CustomFS
 
             File directory = findFile(fileName);
 
-            if (directory == null || directory.isDir == false)
+            if (directory == null || directory.metadata.isDir == false)
                 return NtStatus.Error;
             // DeleteOnClose gets or sets a value indicating whether the file has to be deleted during the IDokanOperations.Cleanup event. 
             info.DeleteOnClose = true;
@@ -205,7 +203,7 @@ namespace CustomFS
             //File fl = fileTree.search(fileName);
             File file = findFile(fileName);
 
-            if (file == null || file.isDir == true)
+            if (file == null || file.metadata.isDir == true)
                 return NtStatus.Error;
             // DeleteOnClose gets or sets a value indicating whether the file has to be deleted during the IDokanOperations.Cleanup event. 
             info.DeleteOnClose = true;
@@ -267,13 +265,13 @@ namespace CustomFS
                 //traverseResults.Sort(); //folders come before files.This isn't possible to do in the B tree itself because Dokan has no clue what is a file and what is a folder.It is up to the programmer to find out.
                 foreach (File foundFile in traverseResults)
                 {
-                    long fileLen = (foundFile.data == null) ? 0 : foundFile.data.Length;
+                    long fileLen = (foundFile.metadata.data == null) ? 0 : foundFile.metadata.data.Length;
                     FileInformation fileInfo = new FileInformation();
-                    fileInfo.FileName = foundFile.name;
+                    fileInfo.FileName = foundFile.metadata.name;
                     fileInfo.Length = fileLen;
                     fileInfo.CreationTime = DateTime.Now;
                     fileInfo.LastWriteTime = DateTime.Now;
-                    if (foundFile.isDir == true)
+                    if (foundFile.metadata.isDir == true)
                         fileInfo.Attributes = FileAttributes.Directory;
                     else
                         fileInfo.Attributes = FileAttributes.Normal;
@@ -319,16 +317,16 @@ namespace CustomFS
             if (file != null)
             {
                 long fileLen;// = (file.data == null) ? 0 : file.data.Length;
-                if (file.isDir)
+                if (file.metadata.isDir)
                     fileLen = file.directoryContents.totalDirectorySize;
                 else
-                    fileLen = (file.data == null) ? 0 : file.data.Length;
+                    fileLen = (file.metadata.data == null) ? 0 : file.metadata.data.Length;
                 fileInfo = new FileInformation()
                 {
-                    FileName = file.name,
+                    FileName = file.metadata.name,
                     Length = fileLen,
-                    Attributes = (file.isDir == true) ? FileAttributes.Directory : FileAttributes.Normal,
-                    CreationTime = file.dateCreated,
+                    Attributes = (file.metadata.isDir == true) ? FileAttributes.Directory : FileAttributes.Normal,
+                    CreationTime = file.metadata.dateCreated,
                     LastWriteTime = DateTime.Now
                 };
             }
@@ -372,7 +370,6 @@ namespace CustomFS
             {
                 security = new FileSecurity();
                 var abc = security.AccessRightType;
-                int a = 3;
             }
 
             security = null;
@@ -449,7 +446,7 @@ namespace CustomFS
 
             fileToMove.parentDir.directoryContents.remove(fileToMove);
             fileToMove.changeName(Path.GetFileName(newName));
-            File existingFile = newParent.directoryContents.search(fileToMove.name);
+            File existingFile = newParent.directoryContents.search(fileToMove.metadata.name);
             if(existingFile != null)
             {
                 //file already exists
@@ -464,10 +461,10 @@ namespace CustomFS
             //fileToMove.changeName(Path.GetFileName(newName));
             newParent.directoryContents.insert(fileToMove);
             fileToMove.parentDir = newParent;
-            string parentName = (newParent.name.Equals(@"\")) ? "" : newParent.name;
-            string absoluteParentPath = (newParent.absoluteParentPath.Equals(@"\")) ? "" : newParent.absoluteParentPath;
-            if (fileToMove.isDir == true)
-                fileToMove.absoluteParentPath = absoluteParentPath + @"\" + parentName;
+            string parentName = (newParent.metadata.name.Equals(@"\")) ? "" : newParent.metadata.name;
+            string absoluteParentPath = (newParent.metadata.absoluteParentPath.Equals(@"\")) ? "" : newParent.metadata.absoluteParentPath;
+            if (fileToMove.metadata.isDir == true)
+                fileToMove.metadata.absoluteParentPath = absoluteParentPath + @"\" + parentName;
 
             return NtStatus.Success;
         }
@@ -475,13 +472,9 @@ namespace CustomFS
         //read file contents into the buffer
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
         {
-            if(fileName.Contains("serialize"))
-            {
-                int a = 3;
-            }
             bytesRead = 0;
             File existingFile = findFile(fileName);
-            if ((existingFile == null) || (existingFile.data == null))
+            if ((existingFile == null) || (existingFile.metadata.data == null))
                 return NtStatus.Error;
             int offsetInt = (int)offset;
 
@@ -491,14 +484,14 @@ namespace CustomFS
             //2)buffer is smaller than existingFile.data.Length - offset
                 //read only buffer.Length data
             
-            if(existingFile.data.Length == 0)
+            if(existingFile.metadata.data.Length == 0)
             {
                 bytesRead = 0;
                 return NtStatus.Success;
             }
 
-            long amountOfDataToRead = (buffer.Length > (existingFile.data.Length - offset)) ? (existingFile.data.Length - offset) : buffer.Length;
-            Array.Copy(existingFile.data, offset, buffer, 0, amountOfDataToRead);
+            long amountOfDataToRead = (buffer.Length > (existingFile.metadata.data.Length - offset)) ? (existingFile.metadata.data.Length - offset) : buffer.Length;
+            Array.Copy(existingFile.metadata.data, offset, buffer, 0, amountOfDataToRead);
 
             bytesRead = (int)amountOfDataToRead;
             return NtStatus.Success;
@@ -520,53 +513,53 @@ namespace CustomFS
                 return DokanResult.FileNotFound;
         
             //if(preventFileModification == true && file.endOfFile != 0 && file.alreadyWritten == true)
-            if(file.alreadyWritten == true)
+            if(file.metadata.alreadyWritten == true)
             {
                 //disable file editing
                 return NtStatus.Error;
             }
-            if (buffer.Length + offset == file.endOfFile)
-                file.alreadyWritten = true;
+            if (buffer.Length + offset == file.metadata.endOfFile)
+                file.metadata.alreadyWritten = true;
 
             
 
-            if ((file.data != null) && (offset > file.data.Length))
+            if ((file.metadata.data != null) && (offset > file.metadata.data.Length))
             {
                 bytesWritten = 0;
                 return NtStatus.ArrayBoundsExceeded;
             }
             long changeInSize = 0;
 
-            if (file.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
+            if (file.metadata.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
             {
-                changeInSize = buffer.Length + offset - file.data.Length;
+                changeInSize = buffer.Length + offset - file.metadata.data.Length;
                 byte[] newData = new byte[offset + buffer.Length];
-                freeBytesAvailable -= (newData.Length - file.data.Length);
-                bytesWritten = (newData.Length - file.data.Length);
-                Array.Copy(file.data, 0, newData, 0, offset);
+                freeBytesAvailable -= (newData.Length - file.metadata.data.Length);
+                bytesWritten = (newData.Length - file.metadata.data.Length);
+                Array.Copy(file.metadata.data, 0, newData, 0, offset);
                 Array.Copy(buffer, 0, newData, offset, buffer.Length);
-                file.data = newData;
+                file.metadata.data = newData;
             }
             else
             {
-                if((buffer.Length + offset) < file.data.Length)
+                if((buffer.Length + offset) < file.metadata.data.Length)
                 {
-                    changeInSize = buffer.Length + offset - file.data.Length;
+                    changeInSize = buffer.Length + offset - file.metadata.data.Length;
                     if(offset != 0)
                     {
                         byte[] newBuffer = new byte[buffer.Length + offset];
-                        Array.Copy(file.data, 0, newBuffer, 0, offset);
+                        Array.Copy(file.metadata.data, 0, newBuffer, 0, offset);
                         Array.Copy(buffer, 0, newBuffer, offset, buffer.Length);
-                        file.data = newBuffer;
+                        file.metadata.data = newBuffer;
                     }
                     else
                     {
-                        file.data = new byte[buffer.Length];
-                        Array.Copy(buffer, file.data, buffer.Length);
+                        file.metadata.data = new byte[buffer.Length];
+                        Array.Copy(buffer, file.metadata.data, buffer.Length);
                     }
                 }
                 else
-                    Array.Copy(buffer, file.data, buffer.Length);
+                    Array.Copy(buffer, file.metadata.data, buffer.Length);
                 
                 freeBytesAvailable -= changeInSize;
                 bytesWritten = buffer.Length;
@@ -607,8 +600,8 @@ namespace CustomFS
             }*/
 
             // TODO: Update date modified.
-            if (file.endOfFile == 0)
-                file.alreadyWritten = true;
+            if (file.metadata.endOfFile == 0)
+                file.metadata.alreadyWritten = true;
             return NtStatus.Success;
         }
 
@@ -636,12 +629,16 @@ namespace CustomFS
             //When copying a file from external drive, this method is called after createFile, but before writeFile
             //When editing a file on the virtual drive, writeFile is called before this method.
             File file = findFile(fileName);
-            file.endOfFile = length;
+            file.metadata.endOfFile = length;
             return NtStatus.Success;
         }
         public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime, DateTime? lastWriteTime, IDokanFileInfo info) => NtStatus.NotImplemented;
         public NtStatus UnlockFile(string fileName, long offset, long length, IDokanFileInfo info) => NtStatus.NotImplemented;
-        public NtStatus Unmounted(IDokanFileInfo info) => NtStatus.Success;
+        public NtStatus Unmounted(IDokanFileInfo info)
+        {
+            Console.WriteLine("File system unmounted!");
+            return NtStatus.Success;
+        }
     }
 }

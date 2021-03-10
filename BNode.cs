@@ -145,11 +145,11 @@ namespace CustomFS
         {
 			// Find the first key greater than or equal to k 
 			int i = 0;
-			while ((i < currentNumOfKeys) && (key.CompareTo(keys[i].name) == 1))
+			while ((i < currentNumOfKeys) && (key.CompareTo(keys[i].metadata.name) == 1))
 				i++;
 
 			// If the found key is equal to k, return this node 
-			if ((i < currentNumOfKeys) && (keys[i].name.CompareTo(key) == 0))
+			if ((i < currentNumOfKeys) && (keys[i].metadata.name.CompareTo(key) == 0))
 				return keys[i];
 
 			// If key is not found here and this is a isLeaf node 
@@ -499,7 +499,7 @@ namespace CustomFS
 					root.insertNonFull(key);
 			}
 			numOfFiles++;
-			totalDirectorySize += (key.isDir == false) ? key.data.Length : key.directoryContents.totalDirectorySize;
+			totalDirectorySize += (key.metadata.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
 
 			mutex.ReleaseMutex();
 		}
@@ -514,7 +514,7 @@ namespace CustomFS
 			if (root.remove(key) == true)
             {
 				numOfFiles--;
-				totalDirectorySize -= (key.isDir == false) ? key.data.Length : key.directoryContents.totalDirectorySize;
+				totalDirectorySize -= (key.metadata.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
 			}
 				
 
