@@ -11,6 +11,7 @@ using Org.BouncyCastle.Pkcs;
 using System.Text;
 using Org.BouncyCastle.OpenSsl;
 using System.IO;
+using Org.BouncyCastle.Crypto.Signers;
 
 namespace CustomFS
 {
@@ -20,9 +21,50 @@ namespace CustomFS
         public enum encryptionAlgorithms { AES, ChaCha, ThreeFish }
 
         private static SecureRandom random = new SecureRandom();
-        //private byte[] encryptionKey; //Encryption key will be derived from the user's password.This key will be used for filesystem encryption.
-        //private byte[] MAC_key; //MAC key will also be derived form user's password.
 
+        /// <summary>
+        /// Given data will be hashed using the given hashing algorithm, and signed with PSS algorithm using the given key pair.
+        /// </summary>
+        /// <param name="signVerify">True for signing, false for verifying.</param>
+        /// <param name="data">Data to be signed.</param>
+        /// <returns>Signed byte array.</returns>
+        public static bool signVerify(ref byte[] signature, bool signVerify, byte[] data, AsymmetricKeyParameter key, integrityHashAlgorithm hashingAlgorithm)
+        {
+            IDigest hashAlgo;
+
+            switch (hashingAlgorithm)
+            {
+                case integrityHashAlgorithm.SHA2_256:
+                    hashAlgo = new Sha256Digest();
+                    break;
+                case integrityHashAlgorithm.SHA2_512:
+                    hashAlgo = new Sha512Digest();
+                    break;
+                case integrityHashAlgorithm.SHA3_256:
+                    hashAlgo = new Sha3Digest();
+                    break;
+                case integrityHashAlgorithm.BLAKE2b_512:
+                    hashAlgo = new Blake2bDigest();
+                    break;
+
+                default: return false;
+            }
+
+            PssSigner signer = new PssSigner(new RsaEngine(), hashAlgo); // add support for ECC in the future.
+
+            signer.BlockUpdate(data, 0, data.Length);
+
+
+            signer.Init(signVerify, key);
+
+            if (signVerify == true) // sign
+            {
+                signature = signer.GenerateSignature();
+                return true;
+            }
+            else // verify
+                return signer.VerifySignature(signature);
+        }
         public static void getRandomData(byte[] toFill)
         {
             random.NextBytes(toFill);
@@ -107,39 +149,71 @@ namespace CustomFS
             return cipherText;
         }
 
-        private static byte[] hasher(byte[] data, byte[] salt, IDigest hashFunction)
+        public static byte[] encryptor(encryptionAlgorithms encryptionAlgorithm, byte[] data, byte[] key, byte[] IV, bool encryptDecrypt)
+        {
+            switch(encryptionAlgorithm)
+            {
+                case encryptionAlgorithms.AES:
+                    return encryptDecryptAES(encryptDecrypt, data, key, IV);
+                case encryptionAlgorithms.ChaCha:
+                    return encryptDecryptChaCha(encryptDecrypt, data, key, IV);
+                case encryptionAlgorithms.ThreeFish:
+                    return encryptDecryptThreeFish(encryptDecrypt, data, key, IV);
+
+                default: return null;
+            }
+        }
+        private static byte[] hasher(byte[] data, IDigest hashFunction, byte[] salt = null)
         {
             byte[] hashed = new byte[hashFunction.GetDigestSize()];
 
-            hashFunction.BlockUpdate(salt, 0, salt.Length);
+            if(salt != null)
+                hashFunction.BlockUpdate(salt, 0, salt.Length);
             hashFunction.BlockUpdate(data, 0, data.Length);
             hashFunction.DoFinal(hashed, 0);
 
             return hashed;
         }
 
+        public static byte[] hash(integrityHashAlgorithm hashAlgorithm, byte[] data, byte[] salt = null)
+        {
+            switch(hashAlgorithm)
+            {
+                case integrityHashAlgorithm.SHA2_256:
+                    return hasher(data, new Sha256Digest());
+                case integrityHashAlgorithm.SHA2_512:
+                    return hasher(data, new Sha512Digest());
+                case integrityHashAlgorithm.SHA3_256:
+                    return hasher(data, new Sha3Digest());
+                case integrityHashAlgorithm.BLAKE2b_512:
+                    return hasher(data, new Blake2bDigest());
+
+                default: return null;
+            }
+        }
+
         public static byte[] SHA2_256_hasher(byte[] data, byte[] salt)
         {
             Sha256Digest hashFunction = new Sha256Digest();
-            return hasher(data, salt, hashFunction);
+            return hasher(data, hashFunction, salt);
         }
 
         public static byte[] SHA2_512_hasher(byte[] data, byte[] salt)
         {
             Sha512Digest hashFunction = new Sha512Digest();
-            return hasher(data, salt, hashFunction);
+            return hasher(data, hashFunction, salt);
         }
 
         public static byte[] SHA3_256_hasher(byte[] data, byte[] salt)
         {
             Sha3Digest hashFunction = new Sha3Digest();
-            return hasher(data, salt, hashFunction);
+            return hasher(data, hashFunction, salt);
         }
 
         public static byte[] Blake2b_hasher(byte[] data, byte[] salt) //512 bit hash
         {
             Blake2bDigest hashFunction = new Blake2bDigest();
-            return hasher(data, salt, hashFunction);
+            return hasher(data, hashFunction, salt);
         }
 
         public static void generateCSR(AsymmetricCipherKeyPair keyPair, string commonName, string organizationName, string organizationUnit, string state, string country)
@@ -168,22 +242,11 @@ namespace CustomFS
         }
         public static byte[] scryptKeyDerivation(byte[] data, byte[] salt, int derivedKeyLength)
         {
-            //SCrypt.Generate(password, passData.salt, iterationCount, blockSize, paralelismFactor, passData.hashed_password_with_salt.Length);
-
             int iterationCount = 16384; // must be a power of two
             int blockSize = 8;
             int paralelismFactor = 1; // number of threads used?
 
             return SCrypt.Generate(data, salt, iterationCount, blockSize, paralelismFactor, derivedKeyLength);
         }
-        /*public static byte[] sign_ECDSA(byte[] data, AsymmetricKeyParameter key)
-        {
-
-        }*/
-
-        /*public static byte[] derivePassword()
-        {
-
-        }*/
     }
 }

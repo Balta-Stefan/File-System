@@ -1,19 +1,29 @@
-﻿using System;
+﻿using Org.BouncyCastle.Crypto;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace CustomFS
 {
-	[Serializable]
-    public class File
+	public class InvalidSignature : Exception
     {
+		public InvalidSignature() : base("Invalid signature!") { }
+    }
+
+	[Serializable]
+	public class File
+	{
 		[Serializable]
 		public class FileMetadata
-        {
-			public string name { get; private set; }
-			public bool isDir { get; }
+		{
+			// the problem here is that parentDir and directoryContents aren't included in the integrity check.Fix this in the future.
+
+			public string name;
+			public bool isDir;
 			public string absoluteParentPath;
 			public DateTime dateCreated { get; private set; }
 			[NonSerialized] public byte[] data; //null if isDir == true
@@ -21,34 +31,44 @@ namespace CustomFS
 			public bool alreadyWritten = false;
 
 			public FileMetadata(string name, bool isDir, DateTime creationTime)
-            {
+			{
 				this.name = name;
 				this.isDir = isDir;
 				dateCreated = creationTime;
-            }
+			}
 
-			public void changeName(string newName)
-            {
-				name = newName;
-            }
+
 		}
+		public void changeName(string newName)
+		{
+			name = newName;
+			metadata.name = newName;
+		}
+
+
 		[NonSerialized] public FileMetadata metadata; // { get; private set;  }
 
-		//public string name { get; private set; }
-		//public bool isDir { get; }
+		public string name { get; private set; }
+		public bool isDir { get; }
+
 		public File parentDir;
-		//public string absoluteParentPath;
-		//public DateTime dateCreated;
 		public BTree directoryContents { get; } //used only for directories
-		//public byte[] data; //null if isDir == true
-						
-		//public long endOfFile;
-		//public bool alreadyWritten = false;
+		/*public string name { get; private set; }
+		public bool isDir { get; }
+
+		public string absoluteParentPath;
+		public DateTime dateCreated;
+
+		public byte[] data; //null if isDir == true
+
+		public long endOfFile;
+		public bool alreadyWritten = false;*/
+
 
 		// cryptography related
 		public byte[] IV;
 		public byte[] encryptedData;
-		public byte[] signedChecksum;
+		public byte[] signedChecksum; // encryptedData is hashed and then signed
 
 		// files: serialize metadata, convert it into byte array and encrypt it.The same byte array will also be hashed and signed with the RSA key.
 
@@ -63,9 +83,92 @@ namespace CustomFS
 		// when a folder is opened, its integrity must be verified.It wouldn't make sense to decrypt all the files and folders.Some metadata has to be moved out of the FileMetadata into the File.
 		// that metadata is the filename and isDir flag.
 
+		/// <summary>
+		/// Encrypt the file or folder.
+		/// </summary>
+		/// <param name="encryptionKey">Key used for symmetric encryption.</param>
+		/// <param name="IVlength">Length of IV in bytes.</param>
+		/// <param name="keyPair">Keypair used for signing.</param>
+		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
+        {
+			// convert metadata into a byte array
+			byte[] metadataBytes = null;
+			using (var memoryStream = new MemoryStream())
+			{
+				// Serialize to memory instead of to file
+				var formatter = new BinaryFormatter();
+				formatter.Serialize(memoryStream, metadata);
+
+				// This resets the memory stream position for the following read operation
+				memoryStream.Seek(0, SeekOrigin.Begin);
+
+				// Get the bytes
+				metadataBytes = new byte[memoryStream.Length];
+				memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
+			}
+
+
+			byte[] dataToSign = null;
+
+			IV = new byte[IVlength];
+			CryptoUtilities.getRandomData(IV);
+			if(isDir == false)
+            {
+				encryptedData = CryptoUtilities.encryptor(encryptionAlgorithm, metadata.data, encryptionKey, IV, true);
+				dataToSign = encryptedData;
+			}
+			else
+            {
+				List<File> dirContents = new List<File>();
+				directoryContents.traverse(out dirContents);
+
+				// hash name-isDir pairs of each found File reference
+				byte[] isDirFlag = new byte[1];
+				foreach(File f in dirContents)
+                {
+					dataToSign = CryptoUtilities.hash(hashingAlgorithm, Encoding.UTF8.GetBytes(f.name));
+					if (f.isDir == true)
+						isDirFlag[0] = (byte)1;
+					else
+						isDirFlag[0] = (byte)0;
+
+					dataToSign = CryptoUtilities.hash(hashingAlgorithm, dataToSign);
+                }
+			}
+
+			CryptoUtilities.signVerify(ref signedChecksum, true, dataToSign, keyPair.Private, hashingAlgorithm);
+        }
+
+		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, byte[] symmetricEncryptionKey, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
+        {
+			// to do
+			if(CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
+            {
+				throw new InvalidSignature();
+			}
+			signedChecksum = null;
+
+			// decrypt the data
+
+			if(isDir == false) // only files are encrypted
+            {
+				byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, IV, false);
+
+				BinaryFormatter bf = new BinaryFormatter();
+				using (MemoryStream ms = new MemoryStream(metadataBytes))
+				{
+					metadata = (FileMetadata)bf.Deserialize(ms);
+				}
+				IV = null;
+				encryptedData = null;
+			}
+		}
+
 		public File(string name, File parentDir, bool isDir, DateTime creationTime)
         {
 			metadata = new FileMetadata(name, isDir, creationTime);
+			this.name = name;
+			this.isDir = isDir;
 
 			//this.name = name;
 			//this.isDir = isDir;
@@ -75,11 +178,6 @@ namespace CustomFS
 				directoryContents = new BTree();
 			else
 				metadata.data = new byte[0];
-        }
-		public bool changeName(string newName)
-        {
-			metadata.changeName(newName);
-			return true;
         }
 		public int CompareTo(object val)
         {

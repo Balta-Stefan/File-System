@@ -11,9 +11,11 @@ using System.Threading.Tasks;
 using DokanNet;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Generators;
 using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Crypto.Signers;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.OpenSsl;
 using Org.BouncyCastle.Pkcs;
@@ -421,13 +423,17 @@ namespace CustomFS
             }
             return true;
         }
+        
+ 
         static void Main(string[] args)
         {
             Program obj = new Program();
-            obj.deserializeDatabase(); // call on startup every time
-            
+            //obj.deserializeDatabase(); // call on startup every time
+
             //obj.registerUser();
-            obj.login();
+            //obj.login();
+
+
 
             int a = 3;
             /*
