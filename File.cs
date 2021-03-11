@@ -26,7 +26,7 @@ namespace CustomFS
 			public bool isDir;
 			public string absoluteParentPath;
 			public DateTime dateCreated { get; private set; }
-			[NonSerialized] public byte[] data; //null if isDir == true
+			public byte[] data; //null if isDir == true
 			public long endOfFile;
 			public bool alreadyWritten = false;
 
@@ -53,24 +53,13 @@ namespace CustomFS
 
 		public File parentDir;
 		public BTree directoryContents { get; } //used only for directories
-		/*public string name { get; private set; }
-		public bool isDir { get; }
-
-		public string absoluteParentPath;
-		public DateTime dateCreated;
-
-		public byte[] data; //null if isDir == true
-
-		public long endOfFile;
-		public bool alreadyWritten = false;*/
-
 
 		// cryptography related
 		public byte[] IV;
 		public byte[] encryptedData;
 		public byte[] signedChecksum; // encryptedData is hashed and then signed
 
-		// files: serialize metadata, convert it into byte array and encrypt it.The same byte array will also be hashed and signed with the RSA key.
+		// files: serialize metadata, convert it into byte array and encrypt it.The same byte array will also be signed with the RSA key.
 
 		// folders: Nothing will be encrypted.Only integrity has to be taken care of.
 		// call the traverse method of the BTree with a List passed as argument.This list will contain all the files and folders contained in that BTree.
@@ -91,68 +80,46 @@ namespace CustomFS
 		/// <param name="keyPair">Keypair used for signing.</param>
 		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			// convert metadata into a byte array
-			byte[] metadataBytes = null;
-			using (var memoryStream = new MemoryStream())
-			{
-				// Serialize to memory instead of to file
-				var formatter = new BinaryFormatter();
-				formatter.Serialize(memoryStream, metadata);
-
-				// This resets the memory stream position for the following read operation
-				memoryStream.Seek(0, SeekOrigin.Begin);
-
-				// Get the bytes
-				metadataBytes = new byte[memoryStream.Length];
-				memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
-			}
-
-
 			byte[] dataToSign = null;
 
-			IV = new byte[IVlength];
-			CryptoUtilities.getRandomData(IV);
 			if(isDir == false)
             {
-				encryptedData = CryptoUtilities.encryptor(encryptionAlgorithm, metadata.data, encryptionKey, IV, true);
+				// convert metadata into a byte array
+				byte[] metadataBytes = null;
+				using (var memoryStream = new MemoryStream())
+				{
+					// Serialize to memory instead of to file
+					var formatter = new BinaryFormatter();
+					formatter.Serialize(memoryStream, metadata);
+
+					// This resets the memory stream position for the following read operation
+					memoryStream.Seek(0, SeekOrigin.Begin);
+
+					// Get the bytes
+					metadataBytes = new byte[memoryStream.Length];
+					memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
+				}
+
+				encryptedData = CryptoUtilities.encryptor(encryptionAlgorithm, metadataBytes, encryptionKey, ref IV, true);
 				dataToSign = encryptedData;
 			}
 			else
-            {
-				List<File> dirContents = new List<File>();
-				directoryContents.traverse(out dirContents);
-
-				// hash name-isDir pairs of each found File reference
-				byte[] isDirFlag = new byte[1];
-				foreach(File f in dirContents)
-                {
-					dataToSign = CryptoUtilities.hash(hashingAlgorithm, Encoding.UTF8.GetBytes(f.name));
-					if (f.isDir == true)
-						isDirFlag[0] = (byte)1;
-					else
-						isDirFlag[0] = (byte)0;
-
-					dataToSign = CryptoUtilities.hash(hashingAlgorithm, dataToSign);
-                }
-			}
+				dataToSign = hashFolderContents(directoryContents, hashingAlgorithm);
+			
 
 			CryptoUtilities.signVerify(ref signedChecksum, true, dataToSign, keyPair.Private, hashingAlgorithm);
         }
 
 		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, byte[] symmetricEncryptionKey, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			// to do
-			if(CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
-            {
-				throw new InvalidSignature();
-			}
-			signedChecksum = null;
-
-			// decrypt the data
-
 			if(isDir == false) // only files are encrypted
             {
-				byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, IV, false);
+				if (CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
+					throw new InvalidSignature();
+				
+				signedChecksum = null;
+
+				byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
 
 				BinaryFormatter bf = new BinaryFormatter();
 				using (MemoryStream ms = new MemoryStream(metadataBytes))
@@ -161,7 +128,42 @@ namespace CustomFS
 				}
 				IV = null;
 				encryptedData = null;
+
+				if(metadata.name != name || metadata.isDir != isDir)
+					throw new Exception("Data corrupted.");
 			}
+			else // for folders, only check their integrity.
+            {
+				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
+				if (CryptoUtilities.signVerify(ref signedChecksum, false, folderContentsHash, keyPair.Public, hashingAlgorithm) == false)
+					throw new InvalidSignature();
+            }
+		}
+
+		/// <summary>
+		/// Hashes pairs File.name and File.isDir.
+		/// </summary>
+		/// <param name="folder">Starting folder.</param>
+		/// <returns>Hash of all name and isDir pairs</returns>
+		private byte[] hashFolderContents(BTree folder, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
+        {
+			List<File> dirContents = new List<File>();
+			folder.traverse(out dirContents);
+
+			// hash name-isDir pairs of each found File reference
+			byte[] isDirFlag = new byte[1];
+			byte[] dataToSign = null;
+			foreach (File f in dirContents)
+			{
+				dataToSign = CryptoUtilities.hash(hashingAlgorithm, Encoding.UTF8.GetBytes(f.name));
+				if (f.isDir == true)
+					isDirFlag[0] = 1;
+				else
+					isDirFlag[0] = 0;
+
+				dataToSign = CryptoUtilities.hash(hashingAlgorithm, dataToSign);
+			}
+			return dataToSign;
 		}
 
 		public File(string name, File parentDir, bool isDir, DateTime creationTime)

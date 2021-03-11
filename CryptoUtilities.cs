@@ -25,9 +25,10 @@ namespace CustomFS
         /// <summary>
         /// Given data will be hashed using the given hashing algorithm, and signed with PSS algorithm using the given key pair.
         /// </summary>
+        /// <param name="signature">Contains the signature when verifying.When making a signature, it will be dumped here.</param>
         /// <param name="signVerify">True for signing, false for verifying.</param>
         /// <param name="data">Data to be signed.</param>
-        /// <returns>Signed byte array.</returns>
+        /// <returns>Flag that specifies if the given key and data were indeed used to form the signature if verification is needed.True is returned when making a signature.</returns>
         public static bool signVerify(ref byte[] signature, bool signVerify, byte[] data, AsymmetricKeyParameter key, integrityHashAlgorithm hashingAlgorithm)
         {
             IDigest hashAlgo;
@@ -71,14 +72,15 @@ namespace CustomFS
         }
 
         /// <summary>
-        /// IV and key must be of equal size.
+        /// IV must be 128 bits long (16 bytes).
         /// </summary>
         /// <param name="key">Key must be 128, 192 or 256 bits long.</param>
         /// <param name="encrypt">Encrypt for true, decrypt for false.</param>
+        /// <param name="IV">Must be 16 bytes long.</param>
         /// <returns>Encrypted data</returns>
         public static byte[] encryptDecryptAES(bool encrypt, byte[] data, byte[] key, byte[] IV)
         {
-            IBlockCipher engine = new AesEngine();
+            AesEngine engine = new AesEngine();
             BufferedBlockCipher cipher = new PaddedBufferedBlockCipher(new CbcBlockCipher(engine));
             ParametersWithIV allParams = new ParametersWithIV(new KeyParameter(key), IV); //contains IV and the key
 
@@ -125,6 +127,11 @@ namespace CustomFS
             return workData;
         }
 
+        /// <summary>
+        /// Block size is 256 bits.
+        /// </summary>
+        /// <param name="IV">Must be 32 bytes long.</param>
+        /// <returns></returns>
         public static byte[] encryptDecryptThreeFish(bool encrypt, byte[] data, byte[] key, byte[] IV)
         {
             IBlockCipher engine = new ThreefishEngine(256);
@@ -149,16 +156,31 @@ namespace CustomFS
             return cipherText;
         }
 
-        public static byte[] encryptor(encryptionAlgorithms encryptionAlgorithm, byte[] data, byte[] key, byte[] IV, bool encryptDecrypt)
+        public static byte[] encryptor(encryptionAlgorithms encryptionAlgorithm, byte[] data, byte[] key, ref byte[] IV, bool encrypt)
         {
             switch(encryptionAlgorithm)
             {
                 case encryptionAlgorithms.AES:
-                    return encryptDecryptAES(encryptDecrypt, data, key, IV);
+                    if(encrypt == true)
+                    {
+                        IV = new byte[16];
+                        getRandomData(IV);
+                    }
+                    return encryptDecryptAES(encrypt, data, key, IV);
                 case encryptionAlgorithms.ChaCha:
-                    return encryptDecryptChaCha(encryptDecrypt, data, key, IV);
+                    if (encrypt == true)
+                    {
+                        IV = new byte[8];
+                        getRandomData(IV);
+                    }
+                    return encryptDecryptChaCha(encrypt, data, key, IV);
                 case encryptionAlgorithms.ThreeFish:
-                    return encryptDecryptThreeFish(encryptDecrypt, data, key, IV);
+                    if (encrypt == true)
+                    {
+                        IV = new byte[32];
+                        getRandomData(IV);
+                    }
+                    return encryptDecryptThreeFish(encrypt, data, key, IV);
 
                 default: return null;
             }

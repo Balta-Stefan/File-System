@@ -433,7 +433,16 @@ namespace CustomFS
             //obj.registerUser();
             //obj.login();
 
+            byte[] message = Encoding.UTF8.GetBytes("This is my message");
+            byte[] IV = new byte[32];
+            CryptoUtilities.getRandomData(IV);
 
+            byte[] key = new byte[32];
+            getRandomData(key);
+            byte[] encrypted = CryptoUtilities.encryptDecryptThreeFish(true, message, key, IV);
+
+            byte[] decrypted = encryptDecryptThreeFish(false, encrypted, key, IV);
+            Console.WriteLine(Encoding.UTF8.GetString(decrypted));
 
             int a = 3;
             /*
