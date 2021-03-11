@@ -575,30 +575,6 @@ namespace CustomFS
                 parent = parent.parentDir;
             }
 
-            /*if (info.WriteToEndOfFile) //append data.Problem: when offset != 0, this flag isn't set.
-            {
-                if(file.data.Length < (buffer.Length + offset)) //data buffer too small, expand it
-                {
-                    byte[] newData = new byte[offset + buffer.Length];
-                    freeBytesAvailable -= (newData.Length - file.data.Length);
-                    bytesWritten = (newData.Length - file.data.Length);
-                    Array.Copy(file.data, 0, newData, 0, offset);
-                    Array.Copy(buffer, 0, newData, offset, buffer.Length);
-                    file.data = newData;
-                }
-                else
-                {
-                    //data can fit into the buffer
-                    Array.Copy(buffer, 0, file.data, offset, buffer.Length);
-                    freeBytesAvailable -= buffer.Length;
-                    bytesWritten = buffer.Length;
-                }
-            }
-            else
-            {
-                //this will be called even when offset != 0
-            }*/
-
             // TODO: Update date modified.
             if (file.metadata.endOfFile == 0)
                 file.metadata.alreadyWritten = true;

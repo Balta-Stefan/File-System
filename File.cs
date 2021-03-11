@@ -46,8 +46,9 @@ namespace CustomFS
 		}
 
 
-		[NonSerialized] public FileMetadata metadata; // { get; private set;  }
+		[NonSerialized] public FileMetadata metadata = null; // { get; private set;  }
 
+		public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
 		public string name { get; private set; }
 		public bool isDir { get; }
 

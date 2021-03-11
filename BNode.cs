@@ -435,6 +435,7 @@ namespace CustomFS
 		public long totalDirectorySize = 0;
 		private static readonly int minimumDegree = 256;
 
+		private bool modified = false; // when true, folder's signature has to be recalculated.
 
 		// function to traverse the tree 
 		public void traverse(out List<File> result)
@@ -501,6 +502,7 @@ namespace CustomFS
 			numOfFiles++;
 			totalDirectorySize += (key.metadata.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
 
+			modified = true;
 			mutex.ReleaseMutex();
 		}
 
@@ -529,8 +531,8 @@ namespace CustomFS
 					root = root.childNodes[0];
 
 			}
+			modified = true;
 			mutex.ReleaseMutex();
-			return;
 		}
 	}
 
