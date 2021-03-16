@@ -13,6 +13,10 @@ namespace CustomFS
     {
 		public InvalidSignature() : base("Invalid signature!") { }
     }
+	public class DataCorruption : Exception
+    {
+		public DataCorruption() : base("Data corrupted!") { }
+    }
 
 	[Serializable]
 	public class File
@@ -28,7 +32,7 @@ namespace CustomFS
 			public DateTime dateCreated { get; private set; }
 			public byte[] data; //null if isDir == true
 			public long endOfFile;
-			public bool alreadyWritten = false;
+			//public bool alreadyWritten = false;
 
 			public FileMetadata(string name, bool isDir, DateTime creationTime)
 			{
@@ -48,7 +52,7 @@ namespace CustomFS
 
 		[NonSerialized] public FileMetadata metadata = null; // { get; private set;  }
 
-		public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
+		[NonSerialized] public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
 		public string name { get; private set; }
 		public bool isDir { get; }
 
@@ -59,6 +63,7 @@ namespace CustomFS
 		public byte[] IV;
 		public byte[] encryptedData;
 		public byte[] signedChecksum; // encryptedData is hashed and then signed
+		public byte[] folderContentsSignature; // used to verify the integrity of a folder
 
 		// files: serialize metadata, convert it into byte array and encrypt it.The same byte array will also be signed with the RSA key.
 
@@ -81,88 +86,101 @@ namespace CustomFS
 		/// <param name="keyPair">Keypair used for signing.</param>
 		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			byte[] dataToSign = null;
+			if (modified == false)
+				return;
+			modified = false;
+			// convert metadata into a byte array
+			byte[] metadataBytes = null;
+			serializeMetadata(ref metadataBytes);
+			encryptedData = CryptoUtilities.encryptor(encryptionAlgorithm, metadataBytes, encryptionKey, ref IV, true);
 
-			if(isDir == false)
-            {
-				// convert metadata into a byte array
-				byte[] metadataBytes = null;
-				using (var memoryStream = new MemoryStream())
-				{
-					// Serialize to memory instead of to file
-					var formatter = new BinaryFormatter();
-					formatter.Serialize(memoryStream, metadata);
-
-					// This resets the memory stream position for the following read operation
-					memoryStream.Seek(0, SeekOrigin.Begin);
-
-					// Get the bytes
-					metadataBytes = new byte[memoryStream.Length];
-					memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
-				}
-
-				encryptedData = CryptoUtilities.encryptor(encryptionAlgorithm, metadataBytes, encryptionKey, ref IV, true);
-				dataToSign = encryptedData;
-			}
-			else
-				dataToSign = hashFolderContents(directoryContents, hashingAlgorithm);
-			
-
-			CryptoUtilities.signVerify(ref signedChecksum, true, dataToSign, keyPair.Private, hashingAlgorithm);
-        }
-
-		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, byte[] symmetricEncryptionKey, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
-        {
-			if(isDir == false) // only files are encrypted
-            {
-				if (CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
-					throw new InvalidSignature();
-				
-				signedChecksum = null;
-
-				byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
-
-				BinaryFormatter bf = new BinaryFormatter();
-				using (MemoryStream ms = new MemoryStream(metadataBytes))
-				{
-					metadata = (FileMetadata)bf.Deserialize(ms);
-				}
-				IV = null;
-				encryptedData = null;
-
-				if(metadata.name != name || metadata.isDir != isDir)
-					throw new Exception("Data corrupted.");
-			}
-			else // for folders, only check their integrity.
+			if (isDir == true)
             {
 				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
-				if (CryptoUtilities.signVerify(ref signedChecksum, false, folderContentsHash, keyPair.Public, hashingAlgorithm) == false)
+				CryptoUtilities.signVerify(ref folderContentsSignature, true, folderContentsHash, keyPair.Private, hashingAlgorithm);
+			}
+
+			CryptoUtilities.signVerify(ref signedChecksum, true, encryptedData, keyPair.Private, hashingAlgorithm);
+        }
+
+
+		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
+        {
+			if (CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
+				throw new InvalidSignature();
+
+			
+			//signedChecksum = null;
+
+			byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
+
+			BinaryFormatter bf = new BinaryFormatter();
+			using (MemoryStream ms = new MemoryStream(metadataBytes))
+			{
+				metadata = (FileMetadata)bf.Deserialize(ms);
+			}
+			//IV = null;
+			//encryptedData = null;
+			
+			if(isDir == true)
+            {
+				// check the integrity of folder contents
+				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
+				if (CryptoUtilities.signVerify(ref folderContentsSignature, false, folderContentsHash, keyPair.Public, hashingAlgorithm) == false)
 					throw new InvalidSignature();
+				//folderContentsSignature = null;
             }
+			if (metadata.name != name || metadata.isDir != isDir)
+				throw new DataCorruption();
+		}
+		private void serializeMetadata(ref byte[] metadataBytes)
+		{
+			using (var memoryStream = new MemoryStream())
+			{
+				// Serialize to memory instead of to file
+				var formatter = new BinaryFormatter();
+				formatter.Serialize(memoryStream, metadata);
+
+				// This resets the memory stream position for the following read operation
+				memoryStream.Seek(0, SeekOrigin.Begin);
+
+				// Get the bytes
+				metadataBytes = new byte[memoryStream.Length];
+				memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
+			}
 		}
 
 		/// <summary>
-		/// Hashes pairs File.name and File.isDir.
+		/// Hashes folder metadata and File.name - File.isDir pairs.
 		/// </summary>
 		/// <param name="folder">Starting folder.</param>
 		/// <returns>Hash of all name and isDir pairs</returns>
 		private byte[] hashFolderContents(BTree folder, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
         {
-			List<File> dirContents = new List<File>();
+			List<File> dirContents;
 			folder.traverse(out dirContents);
 
 			// hash name-isDir pairs of each found File reference
 			byte[] isDirFlag = new byte[1];
-			byte[] dataToSign = null;
+			byte[] dataToSign = new byte[0];
+
+
 			foreach (File f in dirContents)
 			{
-				dataToSign = CryptoUtilities.hash(hashingAlgorithm, Encoding.UTF8.GetBytes(f.name));
+				byte[] temp = CryptoUtilities.hash(hashingAlgorithm, Encoding.UTF8.GetBytes(f.name));
+
 				if (f.isDir == true)
 					isDirFlag[0] = 1;
 				else
 					isDirFlag[0] = 0;
 
-				dataToSign = CryptoUtilities.hash(hashingAlgorithm, dataToSign);
+				// merge old dataToSign, temp and isDirFlag.This might not be working properly.Test it!
+				byte[] temp2 = new byte[dataToSign.Length + temp.Length + isDirFlag.Length];
+				Array.Copy(dataToSign, temp2, dataToSign.Length);
+				Array.Copy(temp, 0, temp2, dataToSign.Length, temp.Length);
+				temp2[temp2.Length - 1] = isDirFlag[0];
+
+				dataToSign = CryptoUtilities.hash(hashingAlgorithm, temp2);
 			}
 			return dataToSign;
 		}

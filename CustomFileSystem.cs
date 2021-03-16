@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using DokanNet;
+using Org.BouncyCastle.Crypto;
 
 namespace CustomFS
 {
@@ -50,43 +51,73 @@ namespace CustomFS
         private long freeBytesAvailable = capacity;
         private readonly File root;
         private readonly string drivePrefix;
-        private readonly string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+        //private readonly string userName = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
         private readonly Mutex mutex = new Mutex();
+        private readonly List<File> requiresEncryption = new List<File>(); // contains all files that have to be encrypted and signed and folders that only have to be signed because its contents were changed.
         bool preventFileModification = true;
 
-        public CustomFileSystem(string drivePrefix, File root)
+        static readonly string filesystemSerializedFile = "Filesystem tree.bin";
+        static readonly string serializeFolderName = "serialize";
+
+        CryptoUtilities.integrityHashAlgorithm hashingAlgorithm;
+        CryptoUtilities.encryptionAlgorithms encryptionAlgorithm;
+        byte[] symmetricKey;
+        AsymmetricCipherKeyPair keyPair;
+
+        public CustomFileSystem(string drivePrefix, File root, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, byte[] symmetricKey, AsymmetricCipherKeyPair keyPair)
         {
+            this.keyPair = keyPair;
+            this.symmetricKey = symmetricKey;
+            this.hashingAlgorithm = hashingAlgorithm;
+            this.encryptionAlgorithm = encryptionAlgorithm;
             this.drivePrefix = drivePrefix;
             this.root = root;
+
+            root.modified = true;
         }
-        public CustomFileSystem(string drivePrefix)
+        public CustomFileSystem(string drivePrefix, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, byte[] symmetricKey, AsymmetricCipherKeyPair keyPair)
         {
+            this.symmetricKey = symmetricKey;
+            this.keyPair = keyPair;
+            this.hashingAlgorithm = hashingAlgorithm;
+            this.encryptionAlgorithm = encryptionAlgorithm;
+            this.drivePrefix = drivePrefix;
             root = new File(@"\", null, true, DateTime.Now);
             root.metadata.absoluteParentPath = "";
-            this.drivePrefix = drivePrefix;
-            File serializationFile = new File("serialize", root, true, DateTime.Now);
+            root.modified = true;
+            requiresEncryption.Add(root);
+
+            File serializationFile = new File(serializeFolderName, root, true, DateTime.Now);
             root.directoryContents.insert(serializationFile);
             serializationFile.metadata.absoluteParentPath = @"\";
+            serializationFile.modified = true;
+            requiresEncryption.Add(serializationFile);
         }
 
         private void serializeFileSystem()
         {
             mutex.WaitOne();
             IFormatter formatter = new BinaryFormatter();
-            Stream stream = new FileStream("Filesystem tree.bin", FileMode.Create, System.IO.FileAccess.Write, FileShare.None);
+            Stream stream = new FileStream(filesystemSerializedFile, FileMode.Create, System.IO.FileAccess.Write, FileShare.None);
             formatter.Serialize(stream, root);
             stream.Close();
             mutex.ReleaseMutex();
         }
         public void Cleanup(string fileName, IDokanFileInfo info)
         {
-            //This method is called only for the file that is deleted.
-            //When fileName represents a folder, this method WILL NOT be called for all of its contents.It is up to the programmer to delete all contents of the folder.
+            // This method is called only for the file that is deleted.
+            // When fileName represents a folder, this method WILL NOT be called for all of its contents.It is up to the programmer to delete all contents of the folder.
 
             File wantedFile = findFile(fileName);
             if (info.DeleteOnClose == true)
             {
                 freeBytesAvailable += (wantedFile.metadata.isDir == true) ? wantedFile.directoryContents.totalDirectorySize : wantedFile.metadata.data.Length;
+                wantedFile.parentDir.modified = true;
+                if(wantedFile.parentDir.modified == false)
+                {
+                    wantedFile.parentDir.modified = true;
+                    requiresEncryption.Add(wantedFile.parentDir);
+                }
                 wantedFile.parentDir.directoryContents.remove(wantedFile);
             }
         }
@@ -95,12 +126,11 @@ namespace CustomFS
         {
             if (fileName.Contains("txt"))
             {
-                access = DokanNet.FileAccess.None;
+                access = DokanNet.FileAccess.None; // WHAT IS THIS???
             }
             if (fileName.Contains(".ini")) //both desktop.ini and Desktop.ini can appear...No clue why...
                 return NtStatus.Success;
-            //if (fileName.Equals(@"\serialize") && access != DokanNet.FileAccess.Synchronize && access != DokanNet.FileAccess.ReadAttributes && access != DokanNet.FileAccess.GenericRead && access != (DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize) && access != DokanNet.FileAccess.ReadPermissions)
-            if(fileName.Equals(@"\serialize"))
+            if (fileName.Equals(@"\" + serializeFolderName))
             {
                 //there is no way to determine if a file is being opened
 
@@ -111,24 +141,37 @@ namespace CustomFS
                 //Synchronize - on right click > properties
                 //ReadData | ReadAattributes | Synchronize on opening
 
+
                 info.IsDirectory = true;
-                if(access == (DokanNet.FileAccess.ReadData | DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize))
+                /*DokanNet.FileAccess forbiddenAttribute1 = DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize;
+                DokanNet.FileAccess forbiddenAttribute3 = DokanNet.FileAccess.ReadPermissions;
+                DokanNet.FileAccess forbiddenAttribute4 = DokanNet.FileAccess.GenericRead;
+                DokanNet.FileAccess forbiddenAttribute5 = DokanNet.FileAccess.ReadAttributes;
+                DokanNet.FileAccess forbiddenAttribute6 = DokanNet.FileAccess.Synchronize;
+                DokanNet.FileAccess forbiddenAttribute7 = DokanNet.FileAccess.ReadData | DokanNet.FileAccess.Synchronize;*/
+
+                DokanNet.FileAccess allowedAttributes = DokanNet.FileAccess.ReadData | DokanNet.FileAccess.ReadAttributes | DokanNet.FileAccess.Synchronize;
+
+
+                if (access == allowedAttributes)// && access != forbiddenAttribute2 && access != forbiddenAttribute3 && access != forbiddenAttribute4 && access != forbiddenAttribute5 && access != forbiddenAttribute6 && access != forbiddenAttribute7)
+                {
+                    foreach (File f in requiresEncryption)
+                        f.encrypt(symmetricKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
                     serializeFileSystem(); //this gets activated even when the folder isn't being opened (like when checking its context menu)
+                }
                 return NtStatus.Success;
             }
-            if(fileName.Contains(@"\serialize"))
+            if (fileName.Contains(@"\" + serializeFolderName))
             {
                 //creating anything inside this folder isn't allowed
                 return NtStatus.Error;
             }
             //what to do with root folder (\) and with desktop.ini?
-            if(fileName.Equals(@"\"))
+            if (fileName.Equals(@"\"))
             {
                 info.IsDirectory = true;
                 return NtStatus.Success;
             }
-
-       
             
             //when a file is first created, CreateFile will be called with mode equal to FileMode.Open
             //after that, it will be called with mode equal to FileMode.CreateNew
@@ -160,6 +203,14 @@ namespace CustomFS
                         string parentName = (parent.metadata.name.Equals(@"\")) ? "" : parent.metadata.name;
                         newFolder.metadata.absoluteParentPath = parent.metadata.absoluteParentPath + @"\" + parentName;
                         parent.directoryContents.insert(newFolder);
+
+                        requiresEncryption.Add(newFolder);
+                        if(newFolder.parentDir.modified == false)
+                        {
+                            newFolder.parentDir.modified = true;
+                            requiresEncryption.Add(newFolder.parentDir);
+                        }
+                        newFolder.modified = true;
                         break;
                 }
             }
@@ -174,6 +225,14 @@ namespace CustomFS
                         File newFile = new File(Path.GetFileName(fileName), parent, false, DateTime.Now);
                         //newFile.absoluteParentPath = parent.absoluteParentPath + @"\" + parent.name;
                         parent.directoryContents.insert(newFile);
+
+                        requiresEncryption.Add(newFile);
+                        if(newFile.parentDir.modified == false)
+                        {
+                            newFile.parentDir.modified = true;
+                            requiresEncryption.Add(newFile.parentDir);
+                        }
+                        newFile.modified = true;
                         break;
                 }
             }
@@ -184,7 +243,7 @@ namespace CustomFS
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
         {
             //If fileName represents a folder, this method (or DeleteFile for files) WILL NOT be called for all of the fileName's contents.
-            if (fileName.Equals(@"\serialize"))
+            if (fileName.Equals(@"\" + serializeFolderName))
                 return NtStatus.CannotDelete;
 
             File directory = findFile(fileName);
@@ -249,6 +308,13 @@ namespace CustomFS
             return fileToFind;
         }
         
+        private void decryptFile(File file)
+        {
+            if (file.metadata == null) 
+            {
+                file.decrypt(symmetricKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            }
+        }
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
         {
             File directory = findFile(fileName);
@@ -265,6 +331,25 @@ namespace CustomFS
                 //traverseResults.Sort(); //folders come before files.This isn't possible to do in the B tree itself because Dokan has no clue what is a file and what is a folder.It is up to the programmer to find out.
                 foreach (File foundFile in traverseResults)
                 {
+                    // decrypt the file and verify the signature if needed
+                    // to do!
+                    string type = (foundFile.isDir == true) ? "Folder " : "File ";
+                    try
+                    {
+                        decryptFile(foundFile);
+                    }
+                    catch (InvalidSignature)
+                    {
+                        Console.WriteLine(type + foundFile.name + " has invalid signature!");
+                        continue;
+                    }
+                    catch (DataCorruption)
+                    {
+                        Console.WriteLine(type + foundFile.name + " has been corrupted!");
+                        continue;
+                    }
+                   
+
                     long fileLen = (foundFile.metadata.data == null) ? 0 : foundFile.metadata.data.Length;
                     FileInformation fileInfo = new FileInformation();
                     fileInfo.FileName = foundFile.metadata.name;
@@ -316,6 +401,22 @@ namespace CustomFS
                 
             if (file != null)
             {
+                // decrypt the file and verify its signature if needed
+                // to do!
+                string type = (file.isDir == true) ? "Folder " : "File ";
+                try
+                {
+                    decryptFile(file);
+                }
+                catch (InvalidSignature)
+                {
+                    Console.WriteLine(type + file.name + " has invalid signature!");
+                }
+                catch (DataCorruption)
+                {
+                    Console.WriteLine(type + file.name + " has been corrupted!");
+                }
+
                 long fileLen;// = (file.data == null) ? 0 : file.data.Length;
                 if (file.metadata.isDir)
                     fileLen = file.directoryContents.totalDirectorySize;
@@ -422,12 +523,14 @@ namespace CustomFS
         {
             if (oldName.Equals(newName))
                 return NtStatus.Success;
-            if (newName.Contains(@"\serialize") || oldName.Contains(@"\serialize"))
+
+            if (newName.Contains(@"\" + serializeFolderName) || oldName.Contains(@"\" + serializeFolderName))
                 return NtStatus.Error;
-            
+
 
             File fileToMove = findFile(oldName);
             File newParent = findParent(newName);
+            File oldParent = fileToMove.parentDir;
 
             //remove the oldName from its parent
             //check if it exists in the new directory
@@ -466,6 +569,16 @@ namespace CustomFS
             if (fileToMove.metadata.isDir == true)
                 fileToMove.metadata.absoluteParentPath = absoluteParentPath + @"\" + parentName;
 
+            if(oldParent.modified == false)
+            {
+                oldParent.modified = true;
+                requiresEncryption.Add(oldParent);
+            }
+            if(newParent.modified == false)
+            {
+                newParent.modified = true;
+                requiresEncryption.Add(newParent);
+            }
             return NtStatus.Success;
         }
 
@@ -476,15 +589,29 @@ namespace CustomFS
             File existingFile = findFile(fileName);
             if ((existingFile == null) || (existingFile.metadata.data == null))
                 return NtStatus.Error;
-            int offsetInt = (int)offset;
 
+            string type = (existingFile.isDir == true) ? "Folder " : "File ";
+            try
+            {
+                decryptFile(existingFile);
+            }
+            catch (InvalidSignature)
+            {
+                Console.WriteLine(type + existingFile.name + " has invalid signature!");
+                return NtStatus.Error;
+            }
+            catch (DataCorruption)
+            {
+                Console.WriteLine(type + existingFile.name + " has been corrupted!");
+                return NtStatus.Error;
+            }
             //cases:
             //1)buffer is bigger than (existingFile.data.Length - offset)
-                //read only (existingFile.data.Length - offset) amount of data
+            //read only (existingFile.data.Length - offset) amount of data
             //2)buffer is smaller than existingFile.data.Length - offset
-                //read only buffer.Length data
-            
-            if(existingFile.metadata.data.Length == 0)
+            //read only buffer.Length data
+
+            if (existingFile.metadata.data.Length == 0)
             {
                 bytesRead = 0;
                 return NtStatus.Success;
@@ -511,15 +638,28 @@ namespace CustomFS
 
             if (file == null)
                 return DokanResult.FileNotFound;
-        
+
+            string type = (file.isDir == true) ? "Folder " : "File ";
+            try
+            {
+                decryptFile(file);
+            }
+            catch (InvalidSignature)
+            {
+                Console.WriteLine(type + file.name + " has invalid signature!");
+            }
+            catch (DataCorruption)
+            {
+                Console.WriteLine(type + file.name + " has been corrupted!");
+            }
             //if(preventFileModification == true && file.endOfFile != 0 && file.alreadyWritten == true)
-            if(file.metadata.alreadyWritten == true)
+            /*if (file.metadata.alreadyWritten == true)
             {
                 //disable file editing
                 return NtStatus.Error;
             }
             if (buffer.Length + offset == file.metadata.endOfFile)
-                file.metadata.alreadyWritten = true;
+                file.metadata.alreadyWritten = true;*/
 
             
 
@@ -576,8 +716,15 @@ namespace CustomFS
             }
 
             // TODO: Update date modified.
-            if (file.metadata.endOfFile == 0)
-                file.metadata.alreadyWritten = true;
+            //if (file.metadata.endOfFile == 0)
+                //file.metadata.alreadyWritten = true;
+
+            if(file.modified == false)
+            {
+                file.modified = true;
+                requiresEncryption.Add(file);
+            }
+
             return NtStatus.Success;
         }
 

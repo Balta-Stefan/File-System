@@ -441,10 +441,9 @@ namespace CustomFS
 		public void traverse(out List<File> result)
 		{
 			mutex.WaitOne();
-			result = null;
+			result = new List<File>();
 			if (root != null)
             {
-				result = new List<File>();
 				root.traverse(result);
 			}
 			mutex.ReleaseMutex();

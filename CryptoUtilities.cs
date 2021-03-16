@@ -12,15 +12,31 @@ using System.Text;
 using Org.BouncyCastle.OpenSsl;
 using System.IO;
 using Org.BouncyCastle.Crypto.Signers;
+using System;
+using Org.BouncyCastle.X509;
 
 namespace CustomFS
 {
     public class CryptoUtilities
     {
         public enum integrityHashAlgorithm { SHA2_256, SHA2_512, SHA3_256, BLAKE2b_512 }
-        public enum encryptionAlgorithms { AES, ChaCha, ThreeFish }
+        public enum encryptionAlgorithms { AES, ChaCha, ThreeFish };
 
         private static SecureRandom random = new SecureRandom();
+
+        public static int getIVlength(encryptionAlgorithms algorithm)
+        {
+            switch(algorithm)
+            {
+                case encryptionAlgorithms.AES:
+                    return 16;
+                case encryptionAlgorithms.ChaCha:
+                    return 8;
+                case encryptionAlgorithms.ThreeFish:
+                    return 32;
+                default: throw new Exception("No such type");
+            }
+        }
 
         /// <summary>
         /// Given data will be hashed using the given hashing algorithm, and signed with PSS algorithm using the given key pair.
@@ -66,6 +82,17 @@ namespace CustomFS
             else // verify
                 return signer.VerifySignature(signature);
         }
+
+        public static byte[] ReadFile(string fileName)
+        {
+            FileStream f = new FileStream(fileName, FileMode.Open, FileAccess.Read);
+            int size = (int)f.Length;
+            byte[] data = new byte[size];
+            size = f.Read(data, 0, size);
+            f.Close();
+            return data;
+        }
+
         public static void getRandomData(byte[] toFill)
         {
             random.NextBytes(toFill);
@@ -214,34 +241,11 @@ namespace CustomFS
             }
         }
 
-        public static byte[] SHA2_256_hasher(byte[] data, byte[] salt)
-        {
-            Sha256Digest hashFunction = new Sha256Digest();
-            return hasher(data, hashFunction, salt);
-        }
-
-        public static byte[] SHA2_512_hasher(byte[] data, byte[] salt)
-        {
-            Sha512Digest hashFunction = new Sha512Digest();
-            return hasher(data, hashFunction, salt);
-        }
-
-        public static byte[] SHA3_256_hasher(byte[] data, byte[] salt)
-        {
-            Sha3Digest hashFunction = new Sha3Digest();
-            return hasher(data, hashFunction, salt);
-        }
-
-        public static byte[] Blake2b_hasher(byte[] data, byte[] salt) //512 bit hash
-        {
-            Blake2bDigest hashFunction = new Blake2bDigest();
-            return hasher(data, hashFunction, salt);
-        }
 
         public static void generateCSR(AsymmetricCipherKeyPair keyPair, string commonName, string organizationName, string organizationUnit, string state, string country)
         {
-            string subjectName = "CN=" + commonName + ", O=" + organizationName + ", OU=" + organizationUnit + ", ST=" + state + ", C=" + country
-;            X509Name subject = new X509Name(subjectName);
+            string subjectName = "CN=" + commonName + ", O=" + organizationName + ", OU=" + organizationUnit + ", ST=" + state + ", C=" + country;
+            X509Name subject = new X509Name(subjectName);
             Pkcs10CertificationRequest csr = new Pkcs10CertificationRequest("SHA1WITHRSA", subject, keyPair.Public, null, keyPair.Private); // this requires a private key which will be used to sign the request.
             //https://stackoverflow.com/questions/2953088/create-a-csr-in-c-sharp-using-an-explicit-rsa-key-pair
 
@@ -270,5 +274,99 @@ namespace CustomFS
 
             return SCrypt.Generate(data, salt, iterationCount, blockSize, paralelismFactor, derivedKeyLength);
         }
+
+
+        // not used
+        public static byte[] SHA2_256_hasher(byte[] data, byte[] salt)
+        {
+            Sha256Digest hashFunction = new Sha256Digest();
+            return hasher(data, hashFunction, salt);
+        }
+
+        public static byte[] SHA2_512_hasher(byte[] data, byte[] salt)
+        {
+            Sha512Digest hashFunction = new Sha512Digest();
+            return hasher(data, hashFunction, salt);
+        }
+
+        public static byte[] SHA3_256_hasher(byte[] data, byte[] salt)
+        {
+            Sha3Digest hashFunction = new Sha3Digest();
+            return hasher(data, hashFunction, salt);
+        }
+
+        public static byte[] Blake2b_hasher(byte[] data, byte[] salt) //512 bit hash
+        {
+            Blake2bDigest hashFunction = new Blake2bDigest();
+            return hasher(data, hashFunction, salt);
+        }
+        public static bool verifyCertificate(string rootCertFilename, string clientCertificateFilename)
+        {
+            X509Certificate certificate = null;
+
+            var fileStream = System.IO.File.OpenText(clientCertificateFilename);
+            PemReader reader = new PemReader(fileStream);
+            try
+            {
+                certificate = (X509Certificate)reader.ReadObject();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Error reading the given certificate file.");
+                fileStream.Close();
+                return false;
+            }
+            fileStream.Close();
+            // validate the certificate 
+
+            X509Certificate rootCert = null;
+            fileStream = System.IO.File.OpenText(rootCertFilename);
+            reader = new PemReader(fileStream);
+            try
+            {
+                rootCert = (X509Certificate)reader.ReadObject();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Error reading CA certificate.");
+                fileStream.Close();
+                return false;
+            }
+
+            try
+            {
+                // WARNING: VERIFYING A CERTIFICATE BY ITS OWN PUBLIC KEY WILL STILL PASS
+                certificate.Verify(rootCert.GetPublicKey());
+            }
+            catch (InvalidKeyException)
+            {
+                Console.WriteLine("Given certificate not signed by certificate authority");
+                return false;
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Error verifying the given certificate");
+                return false;
+            }
+
+            return true;
+            /*
+            //https://stackoverflow.com/questions/6097671/how-to-verify-x509-cert-without-importing-root-cert
+
+            X509Chain chain = new X509Chain();
+            chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+
+            chain.ChainPolicy.ExtraStore.Add(rootCert);
+
+            bool valid = chain.Build(clientCertificate);
+
+
+            X509Certificate2 chainRoot = chain.ChainElements[chain.ChainElements.Count - 1].Certificate;
+            var temp = chainRoot.RawData;
+
+            return valid && rootCert.Equals(chainRoot); //compareByteArrays(rootCert.RawData, temp);*/
+        }
+
     }
 }

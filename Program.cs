@@ -7,6 +7,7 @@ using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Security;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using DokanNet;
 using Org.BouncyCastle.Asn1.X509;
@@ -71,13 +72,15 @@ namespace CustomFS
         private string userDatabaseFilename = "User database.bin";
         private Dictionary<string, hashedPassword> database = null;
 
-        private byte[] encryptionKey;
+        public byte[] encryptionKey;
+        public AsymmetricCipherKeyPair keyPair;
+        public integrityHashAlgorithm hashingAlgorithm;
+        public encryptionAlgorithms encryptionAlgorithm;
 
         private static readonly string CAfile = "CA.pem";
 
         byte[] inputPassword()
         {
-            // Instantiate the secure string.
             ConsoleKeyInfo key;
             byte[] temporaryPassword = new byte[15];
             int passwordLength = 0;
@@ -123,10 +126,10 @@ namespace CustomFS
             return temporaryPassword;
         }
 
-        public bool login()
+        public void login()
         {
             Console.WriteLine("Username:");
-            string username = Console.ReadLine();
+            string username = "Marko";//Console.ReadLine();
             byte[] password = inputPassword();
 
             hashedPassword passData;
@@ -134,14 +137,14 @@ namespace CustomFS
             // check the database
             if (database.TryGetValue(username, out passData) == true)
             {
-                byte[] passwordHash = CryptoUtilities.scryptKeyDerivation(password, passData.salt, passData.hashed_password_with_salt.Length);
+                byte[] passwordHash = scryptKeyDerivation(password, passData.salt, passData.hashed_password_with_salt.Length);
 
                 // check if the two derived keys are equal
                 if (compareByteArrays(passwordHash, passData.hashed_password_with_salt) == false)
-                    return false;
+                    throw new Exception("Incorrect password");
             }
             else
-                return false;
+                throw new Exception("Nonexistant user name.");
 
             encryptionKey = scryptKeyDerivation(password, passData.encryptionKeyIV, hashedPassword.keySize); // derive the key for encryption 
 
@@ -150,20 +153,16 @@ namespace CustomFS
             // handle the client certificate
 
             Console.WriteLine("Input the name of the certificate in PEM format:");
-            string certFilename = Console.ReadLine();
+            string certFilename = "mojKlijent.pem";// Console.ReadLine();
 
             if(certFilename.Equals(CAfile))
-            {
-                Console.WriteLine("Can't use CA's own certificate!");
-                return false;
-            }
+                throw new Exception("Can't use CA's own certificate!");
+            
 
             // check if the file exists
             if (System.IO.File.Exists(certFilename) == false)
-            {
-                Console.WriteLine("Given file doesn't exist.Put it into the directory where exe is located");
-                return false;
-            }
+                throw new Exception("Given file doesn't exist.Put it into the directory where exe is located.");
+            
             else
             {
                 X509Certificate certificate = null;
@@ -176,10 +175,13 @@ namespace CustomFS
                 }
                 catch (Exception)
                 {
-                    Console.WriteLine("Error reading the given certificate file.");
-                    fileStream.Close();
-                    return false;
+                    //Console.WriteLine("Error reading the given certificate file.");
+                    throw new Exception("Error reading the given certificate file.");
                 }
+				finally 
+				{
+					fileStream.Close();
+				}
 
                 // validate the certificate 
 
@@ -192,10 +194,13 @@ namespace CustomFS
                 }
                 catch(Exception)
                 {
-                    Console.WriteLine("Error reading CA certificate.");
-                    fileStream.Close();
-                    return false;
+                    //Console.WriteLine("Error reading CA certificate.");
+                    throw new Exception("Error reading CA certificate.");
                 }
+				finally 
+				{
+					fileStream.Close();
+				}
                 
                 try
                 {
@@ -204,19 +209,39 @@ namespace CustomFS
                 }
                 catch(InvalidKeyException)
                 {
-                    Console.WriteLine("Given certificate not signed by certificate authority");
-                    return false;
+                    //Console.WriteLine("Given certificate not signed by certificate authority");
+                    throw new Exception("Given certificate not signed by certificate authority");
                 }
                 catch(Exception)
                 {
-                    Console.WriteLine("Error verifying the given certificate");
-                    return false;
+                    //Console.WriteLine("Error verifying the given certificate");
+                    throw new Exception("Error verifying the given certificate");
                 }
 
                 //Console.WriteLine(certificate);
             }
 
-            return true;
+            Console.WriteLine("Enter the name of the file that containts your RSA key pair: ");
+            string keypairFile = "clientKey.pem";// Console.ReadLine();
+            if (System.IO.File.Exists(keypairFile) == false)
+            {
+                throw new Exception("Given file doesn't exist.Put it into the directory where exe is located");
+            }
+            var stream = System.IO.File.OpenText(keypairFile);
+            PemReader pemReader = new PemReader(stream);
+            try
+            {
+                keyPair = (AsymmetricCipherKeyPair)pemReader.ReadObject();
+            }
+            catch (Exception)
+            {
+                stream.Close();
+                throw new Exception("Error reading the given keypair file.");
+            }
+            stream.Close();
+
+            hashingAlgorithm = passData.hashingAlgorithm;
+            encryptionAlgorithm = passData.encryptionAlgorithm;
         }
         /// <summary>
         /// Takes an array of values and asks the user to choose one.
@@ -428,23 +453,23 @@ namespace CustomFS
         static void Main(string[] args)
         {
             Program obj = new Program();
-            //obj.deserializeDatabase(); // call on startup every time
+            obj.deserializeDatabase(); // call on startup every time
 
             //obj.registerUser();
-            //obj.login();
+            while(true)
+            {
+                try
+                {
+                    obj.login();
+                    break;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e.Message);
+                }
+            }
+           
 
-            byte[] message = Encoding.UTF8.GetBytes("This is my message");
-            byte[] IV = new byte[32];
-            CryptoUtilities.getRandomData(IV);
-
-            byte[] key = new byte[32];
-            getRandomData(key);
-            byte[] encrypted = CryptoUtilities.encryptDecryptThreeFish(true, message, key, IV);
-
-            byte[] decrypted = encryptDecryptThreeFish(false, encrypted, key, IV);
-            Console.WriteLine(Encoding.UTF8.GetString(decrypted));
-
-            int a = 3;
             /*
             byte[] data = Encoding.UTF8.GetBytes("my longest message that will be entered in this example");
             byte[] key = Encoding.UTF8.GetBytes("a key that unlocks doors will 12");
@@ -456,23 +481,23 @@ namespace CustomFS
             Console.WriteLine(Encoding.UTF8.GetString(cipherText));
             Console.WriteLine(Encoding.UTF8.GetString(deciphered));*/
 
-            /*
+
             Stream stream = null;
             try
             {
                 IFormatter formatter = new BinaryFormatter();
                 stream = new FileStream("Filesystem tree.bin", System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read);
-                File obj = (File)formatter.Deserialize(stream);
+                File deserializedRoot = (File)formatter.Deserialize(stream);
                 stream.Close();
-                new CustomFileSystem("Y:", obj).Mount(@"Y:\", DokanOptions.DebugMode | DokanOptions.StderrOutput);
+                new CustomFileSystem("Y:", deserializedRoot, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.encryptionKey, obj.keyPair).Mount(@"Y:\");//, DokanOptions.DebugMode | DokanOptions.StderrOutput);
 
             }
-            catch (System.IO.FileNotFoundException exception)
+            catch (System.IO.FileNotFoundException)
             {
                 if(stream != null)
                     stream.Close();
-                new CustomFileSystem("Y:").Mount(@"Y:\", DokanOptions.DebugMode | DokanOptions.StderrOutput);
-            }*/
+                new CustomFileSystem("Y:", obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.encryptionKey, obj.keyPair).Mount(@"Y:\");//, DokanOptions.DebugMode | DokanOptions.StderrOutput);
+            }
         }
     }
 }
