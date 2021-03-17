@@ -28,17 +28,28 @@ namespace CustomFS
 
 			public string name;
 			public bool isDir;
-			public string absoluteParentPath;
+			public string absolutePath;
 			public DateTime dateCreated { get; private set; }
 			public byte[] data; //null if isDir == true
-			public long endOfFile;
+			public string parentAbsolutePath;
 			//public bool alreadyWritten = false;
 
-			public FileMetadata(string name, bool isDir, DateTime creationTime)
+			public FileMetadata(string name, bool isDir, DateTime creationTime, File parentDir)
 			{
 				this.name = name;
 				this.isDir = isDir;
 				dateCreated = creationTime;
+				if(parentDir != null)
+                {
+					absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+					parentAbsolutePath = parentDir.metadata.absolutePath;
+				}
+				else
+                {
+					// for root folder
+					absolutePath = @"\";
+					parentAbsolutePath = "";
+                }
 			}
 
 
@@ -106,11 +117,15 @@ namespace CustomFS
 
 		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
+			if (signedChecksum == null)
+				return; // already decrypted
+
+
 			if (CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
 				throw new InvalidSignature();
 
 			
-			//signedChecksum = null;
+			signedChecksum = null;
 
 			byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
 
@@ -119,8 +134,8 @@ namespace CustomFS
 			{
 				metadata = (FileMetadata)bf.Deserialize(ms);
 			}
-			//IV = null;
-			//encryptedData = null;
+			IV = null;
+			encryptedData = null;
 			
 			if(isDir == true)
             {
@@ -128,9 +143,9 @@ namespace CustomFS
 				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
 				if (CryptoUtilities.signVerify(ref folderContentsSignature, false, folderContentsHash, keyPair.Public, hashingAlgorithm) == false)
 					throw new InvalidSignature();
-				//folderContentsSignature = null;
+				folderContentsSignature = null;
             }
-			if (metadata.name != name || metadata.isDir != isDir)
+			if (metadata.name != name || metadata.isDir != isDir || metadata.parentAbsolutePath != parentDir.metadata.absolutePath)
 				throw new DataCorruption();
 		}
 		private void serializeMetadata(ref byte[] metadataBytes)
@@ -187,13 +202,11 @@ namespace CustomFS
 
 		public File(string name, File parentDir, bool isDir, DateTime creationTime)
         {
-			metadata = new FileMetadata(name, isDir, creationTime);
+			metadata = new FileMetadata(name, isDir, creationTime, parentDir);
 			this.name = name;
 			this.isDir = isDir;
-
-			//this.name = name;
-			//this.isDir = isDir;
 			this.parentDir = parentDir;
+
 
 			if (isDir == true)
 				directoryContents = new BTree();
@@ -216,6 +229,19 @@ namespace CustomFS
 			return metadata.name.CompareTo(file.metadata.name);
         }
 
+		/*public override bool Equals(object obj)
+        {
+			if (obj is File == false)
+				return false;
+			File tempFile = (File)obj;
+			if (parentDir != tempFile.parentDir)
+				return false;
+			if (name.Equals(tempFile.name) == false)
+				return false;
+			if (isDir != tempFile.isDir)
+				return false;
+			return true;
+        }*/
         public override string ToString()
         {
 			return metadata.name;
