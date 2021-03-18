@@ -145,11 +145,11 @@ namespace CustomFS
         {
 			// Find the first key greater than or equal to k 
 			int i = 0;
-			while ((i < currentNumOfKeys) && (key.CompareTo(keys[i].metadata.name) == 1))
+			while ((i < currentNumOfKeys) && (key.CompareTo(keys[i].name) == 1))
 				i++;
 
 			// If the found key is equal to k, return this node 
-			if ((i < currentNumOfKeys) && (keys[i].metadata.name.CompareTo(key) == 0))
+			if ((i < currentNumOfKeys) && (keys[i].name.CompareTo(key) == 0))
 				return keys[i];
 
 			// If key is not found here and this is a isLeaf node 
@@ -435,7 +435,6 @@ namespace CustomFS
 		public long totalDirectorySize = 0;
 		private static readonly int minimumDegree = 256;
 
-		private bool modified = false; // when true, folder's signature has to be recalculated.
 
 		// function to traverse the tree 
 		public void traverse(out List<File> result)
@@ -499,9 +498,8 @@ namespace CustomFS
 					root.insertNonFull(key);
 			}
 			numOfFiles++;
-			totalDirectorySize += (key.metadata.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
+			totalDirectorySize += (key.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
 
-			modified = true;
 			mutex.ReleaseMutex();
 		}
 
@@ -515,7 +513,7 @@ namespace CustomFS
 			if (root.remove(key) == true)
             {
 				numOfFiles--;
-				totalDirectorySize -= (key.metadata.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
+				totalDirectorySize -= (key.isDir == false) ? key.metadata.data.Length : key.directoryContents.totalDirectorySize;
 			}
 				
 
@@ -530,7 +528,6 @@ namespace CustomFS
 					root = root.childNodes[0];
 
 			}
-			modified = true;
 			mutex.ReleaseMutex();
 		}
 	}

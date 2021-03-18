@@ -9,6 +9,7 @@ using static CustomFS.CryptoUtilities;
 
 namespace CustomFS
 {
+    [Serializable]
     class Filesystem
     {
         // potrebno je implementirati i dijeljenje fajlova sa drugim korisnicima tako da samo taj korisnik moze procitati taj fajl.
@@ -20,18 +21,19 @@ namespace CustomFS
 
         private readonly File root;
         private readonly File uploadFolder;
-        private File currentFolder;
+        [NonSerialized] private File currentFolder;
         public static readonly string uploadFolderName = "upload";
         public static readonly string downloadFolderName = "download";
 
 
-        private byte[] encryptionKey;
-        private readonly integrityHashAlgorithm hashingAlgorithm;
-        private readonly encryptionAlgorithms encryptionAlgorithm;
-        private readonly AsymmetricCipherKeyPair keyPair;
+        [NonSerialized] private byte[] encryptionKey;
+        [NonSerialized] private readonly integrityHashAlgorithm hashingAlgorithm;
+        [NonSerialized] private readonly encryptionAlgorithms encryptionAlgorithm;
+        [NonSerialized] private readonly AsymmetricCipherKeyPair keyPair;
+        [NonSerialized] private readonly Queue<string> messageQueue = new Queue<string>();
 
         private readonly List<File> requiresEncryption = new List<File>();
-        public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, File root = null)
+        public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Filesystem oldFS = null)
         {
             this.encryptionKey = encryptionKey;
             this.hashingAlgorithm = hashingAlgorithm;
@@ -45,23 +47,31 @@ namespace CustomFS
 
             if (root == null)
             {
-                currentFolder = root = new File(@"\", null, true, DateTime.Now);
+                currentFolder = root = new File(Path.DirectorySeparatorChar.ToString(), null, true, DateTime.Now);
                 uploadFolder = new File(uploadFolderName, root, true, DateTime.Now);
                 root.directoryContents.insert(uploadFolder);
+
+                uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+                root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
             else
-                this.root = root;
+                currentFolder = root = oldFS.root;
         }
 
-
+        public Queue<string> getMessages()
+        {
+            Queue<string> temp = new Queue<string>(messageQueue);
+            messageQueue.Clear();
+            return temp;
+        }
 
         /// <summary>
         /// Creates the wanted file in temp folder.
         /// </summary>
         /// <param name="parentDir">Parent folder.</param>
         /// <param name="name">Name of the wanted file.</param>
-        /// <returns>False if specified name doesn't exist within the parentDir or if its a folder.True if name specifies a file.</returns>
-        public bool downloadFile(string fileName)
+        /// <returns>The wanted file.</returns>
+        public File downloadFile(string fileName)
         {
             File wantedFile = findFile(fileName);
             if (wantedFile == null)
@@ -70,11 +80,8 @@ namespace CustomFS
             // first decrypt the file
             wantedFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
 
-            if (wantedFile == null)
-                return false;
-
-            if (wantedFile.isDir == true)
-                return false;
+            if (wantedFile == null || wantedFile.isDir == true)
+                return null;
 
             if (Directory.Exists(downloadFolderName) == false)
                 Directory.CreateDirectory(downloadFolderName);
@@ -86,19 +93,19 @@ namespace CustomFS
                     stream.CopyTo(file);
             }
 
-            return true;
+            return wantedFile;
         }
         /// <summary>
         /// Upload the file specified by the given file name.
         /// </summary>
         /// <param name="fileName">Name of the file.</param>
         /// <returns>False if specified file doesn't exist or if it specifies a folder.True if file upload is successful.</returns>
-        public bool uploadFile(string fileName)
+        public void uploadFile(string fileName)
         {
             if (System.IO.File.Exists(uploadFolderName + Path.DirectorySeparatorChar + fileName) == false)
-                return false;
+                throw new Exception("Specified file doesn't exist.");
             if (Directory.Exists(uploadFolderName + Path.DirectorySeparatorChar + fileName) == true)
-                return false;
+                throw new Exception("Specified file name is a directory.");
 
 
             if (Directory.Exists(uploadFolderName) == false)
@@ -111,9 +118,9 @@ namespace CustomFS
                 newFile.metadata.data = fileStream.ToArray();
 
                 newFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-            }
 
-            return true;
+                uploadFolder.directoryContents.insert(newFile);
+            }
         }
 
         private MemoryStream loadFile(string path)
@@ -172,15 +179,33 @@ namespace CustomFS
                 currentPath = currentFolder; // relative path
 
 
-            int i = 1;
+            int i = 0;
             for (; i < source.Length - 1; i++)
             {
+                try
+                {
+                    currentPath.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+                }
+                catch(Exception e)
+                {
+                    messageQueue.Enqueue(e.Message);
+                }
                 currentPath = currentPath.directoryContents.search(source[i]);
                 if (currentPath == null || currentPath.isDir == false)
                     return null;
             }
             if (i < source.Length)
-                wantedFile = currentPath.directoryContents.search(source[i]);
+            {
+                try
+                {
+                    currentPath.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+                }
+                catch (Exception e)
+                {
+                    messageQueue.Enqueue(e.Message);
+                }
+                wantedFile = currentPath.directoryContents.search(source[i]); // this is either a directory or a file, everything before this was a directory.
+            }
 
             return wantedFile;
         }
@@ -227,6 +252,12 @@ namespace CustomFS
         /// <returns>True if the operation is successful, false otherwise.</returns>
         public bool changeDirectory(string dirName)
         {
+            if(dirName.Equals(".."))
+            {
+                if(currentFolder.parentDir != null)
+                    currentFolder = currentFolder.parentDir;
+                return true;
+            }
             File newDir = findFile(dirName);
 
             if (newDir == null)
@@ -254,6 +285,9 @@ namespace CustomFS
         private File findParent(string path)
         {
             string dirName = Path.GetFileName(path);
+            if(path.IndexOf(Path.DirectorySeparatorChar) == -1)
+                return root; // this will be a problem when dealing with relative paths
+            
             int toRemoveLength = 1 + dirName.Length; // 1 is added because of path separator (slash)
 
             path = path.Remove(path.Length - toRemoveLength);
@@ -263,9 +297,6 @@ namespace CustomFS
             return parentDir;
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
         /// <param name="path">Directory name or path (absolute/relative).</param>
         /// <returns>True for success, false otherwise.</returns>
         public void makeDirectory(string path)
@@ -317,6 +348,11 @@ namespace CustomFS
             currentFolder.directoryContents.traverse(out files);
 
             return files;
+        }
+
+        public string currentPath()
+        {
+            return currentFolder.metadata.absolutePath;
         }
     }
 }

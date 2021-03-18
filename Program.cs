@@ -10,7 +10,6 @@ using System.Security;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using DokanNet;
 using Org.BouncyCastle.Asn1.X509;
 using Org.BouncyCastle.Crypto;
 using Org.BouncyCastle.Crypto.Digests;
@@ -490,6 +489,11 @@ namespace CustomFS
                 Console.WriteLine(e.Message);
                 return;
             }
+            finally
+            {
+                foreach (string s in filesystem.getMessages())
+                    Console.WriteLine(s);
+            }
 
             Process tempProcess = new Process
             {
@@ -512,6 +516,12 @@ namespace CustomFS
             {
                 Console.WriteLine(e.Message);
             }
+            finally
+            {
+                foreach (string s in filesystem.getMessages())
+                    Console.WriteLine(s);
+            }
+
         }
         private void listDir()
         {
@@ -520,7 +530,8 @@ namespace CustomFS
             foreach (File f in files)
             {
                 char fileType = (f.isDir == true) ? 'd' : 'f';
-                Console.WriteLine("(" + fileType + ") " + f.name + ", " + f.metadata.dateCreated);
+                Console.WriteLine(f);
+                //Console.WriteLine("(" + fileType + ") " + f.name + ", " + f.metadata.dateCreated + ", " + f.metadata.data.Length + "B");
             }
         }
        
@@ -542,6 +553,17 @@ namespace CustomFS
             }
         }
         
+        private void editTextFileUtility(char[] charArray, int limit)
+        {
+            Console.Clear();
+            for (int i = 0; i < limit; i++)
+            {
+                if (charArray[i].ToString().Equals(Environment.NewLine))
+                    Console.Write("\r\n");
+                else
+                    Console.Write(charArray[i]);
+            }
+        }
         private void editTextFile(string fileName)
         {
             try
@@ -553,13 +575,21 @@ namespace CustomFS
                 Console.WriteLine(e.Message);
                 return;
             }
+            finally
+            {
+                foreach (string s in filesystem.getMessages())
+                    Console.WriteLine(s);
+            }
 
+            
             File wantedFile = filesystem.findFile(fileName);
             string text = System.IO.File.ReadAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
             char[] textArray = text.ToCharArray();
-
-
             int limit = text.Length;
+
+            editTextFileUtility(textArray, limit);
+
+         
 
             ConsoleKeyInfo key;
             do
@@ -575,14 +605,8 @@ namespace CustomFS
                             limit--;
                         limit--;
                         //Console.Write("\b \b");
-                        Console.Clear();
-                        for (int i = 0; i < limit; i++)
-                        {
-                            if (textArray[i].ToString().Equals(Environment.NewLine))
-                                Console.Write("\r\n");
-                            else
-                                Console.Write(textArray[i]);
-                        }
+                        editTextFileUtility(textArray, limit);
+
                     }
                 }
                 else if (key.Key == ConsoleKey.Enter || ((int)key.Key) >= 32 && ((int)key.Key <= 126))
@@ -611,6 +635,7 @@ namespace CustomFS
                 }
                 // Exit if esc key is pressed.
             } while (key.Key != ConsoleKey.Escape);
+            Console.Clear();
 
             char[] finalArray = new char[limit];
             Array.Copy(textArray, finalArray, limit);
@@ -669,21 +694,43 @@ namespace CustomFS
             {
                 Console.WriteLine(e.Message);
             }
+            finally
+            {
+                foreach (string s in filesystem.getMessages())
+                    Console.WriteLine(s);
+            }
         }
         
         private void remove(string path)
         {
             if (filesystem.removeFile(path) == false)
                 Console.WriteLine("Requested path doesn't exist.");
+         
+            foreach (string s in filesystem.getMessages())
+                Console.WriteLine(s);
         }
-       
+
         private void changeDirectory(string path)
         {
             if (filesystem.changeDirectory(path) == false)
                 Console.WriteLine("Requested directory doesn't exist!");
+          
+            foreach (string s in filesystem.getMessages())
+                Console.WriteLine(s);
         }
-        
-     
+
+        private void uploadFile(string fileName)
+        {
+            // upload file located in the upload folder
+            try
+            {
+                filesystem.uploadFile(fileName);
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+        }
         public void parseCommand(string command)
         {
             string[] parts = command.Split(' ');
@@ -704,46 +751,92 @@ namespace CustomFS
                 Console.WriteLine("Incorrect input");
                 return;
             }
-
-            switch (parts[0])
+            try
             {
-                case "open":
-                    openFile(parts[1]);
-                    break;
-                case "mkdir":
-                    makeDir(parts[1]);
-                    break;
-                case "mv":
-                    move(command.Substring(3));
-                    break;
-                case "maketext":
-                    makeTextFile();
-                    break;
-                case "edit":
-                    editTextFile(parts[1]);
-                    break;
-                case "rm":
-                    remove(parts[1]);
-                    break;
-                case "cd":
-                    changeDirectory(parts[1]);
-                    break;
-      
-                default:
-                    Console.WriteLine("Unknown command.");
-                    break;
+                switch (parts[0])
+                {
+                    case "open":
+                        openFile(command.Substring(5));
+                        break;
+                    case "mkdir":
+                        makeDir(command.Substring(6));
+                        break;
+                    case "mv":
+                        move(command.Substring(3));
+                        break;
+                    case "maketext":
+                        makeTextFile();
+                        break;
+                    case "edit":
+                        editTextFile(command.Substring(5));
+                        break;
+                    case "rm":
+                        remove(command.Substring(3));
+                        break;
+                    case "cd":
+                        changeDirectory(command.Substring(3));
+                        break;
+                    case "upload":
+                        uploadFile(command.Substring(7));
+                        break;
+
+                    default:
+                        Console.WriteLine("Unknown command.");
+                        break;
+                }
+            }
+            catch (IndexOutOfRangeException)
+            {
+                Console.WriteLine("Incorrect input");
             }
         }
         
-      
+        void deserializeFilesystem()
+        {
+            try
+            {
+                using (FileStream stream = new FileStream("Filesystem.bin", FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    BinaryFormatter bf = new BinaryFormatter();
+
+                    Filesystem tempFS = (Filesystem)bf.Deserialize(stream);
+                    filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, tempFS);
+                }
+            }
+            catch(Exception)
+            {
+                filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair); // nothing to deserialize
+            }
+        }
+
+        void serializeFileSystem()
+        {
+            using (FileStream stream = new FileStream("Filesystem.bin", FileMode.OpenOrCreate)) 
+            {
+                BinaryFormatter formatter = new BinaryFormatter();
+                formatter.Serialize(stream, filesystem);
+            }
+        }
 
         static void Main(string[] args)
         {
             Program obj = new Program();
             obj.deserializeDatabase();
-            obj.login();
+            while(true)
+            {
+                try
+                {
+                    obj.login();
+                    break;
+                }
+                catch(Exception e)
+                {
+                    Console.WriteLine(e.Message);
+                }
+            }
+            obj.deserializeFilesystem();
 
-            obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair);
+            //obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair);
 
             while(true)
             {
@@ -751,6 +844,7 @@ namespace CustomFS
                 if (command.Equals("exit"))
                 {
                     obj.filesystem.encryptFileSystem();
+                    obj.serializeFileSystem();
                     return;
                 }
                 else if(command.Equals("help"))
@@ -764,6 +858,7 @@ namespace CustomFS
                     Console.WriteLine("cd path - change working directory to specified path");
                     Console.WriteLine("cls - clear screen");
                     Console.WriteLine("ls - display contents of the working directory");
+                    Console.WriteLine("upload file_name - upload file specified by file_name located in upload folder");
                 }
                 else
                     obj.parseCommand(command);

@@ -11,11 +11,11 @@ namespace CustomFS
 {
 	public class InvalidSignature : Exception
     {
-		public InvalidSignature() : base("Invalid signature!") { }
+		public InvalidSignature(string fileName) : base("Invalid signature: " + fileName) { }
     }
 	public class DataCorruption : Exception
     {
-		public DataCorruption() : base("Data corrupted!") { }
+		public DataCorruption(string fileName) : base("Data corrupted: " + fileName) { }
     }
 
 	[Serializable]
@@ -47,7 +47,7 @@ namespace CustomFS
 				else
                 {
 					// for root folder
-					absolutePath = @"\";
+					absolutePath = Path.DirectorySeparatorChar.ToString();
 					parentAbsolutePath = "";
                 }
 			}
@@ -63,7 +63,7 @@ namespace CustomFS
 
 		[NonSerialized] public FileMetadata metadata = null; // { get; private set;  }
 
-		[NonSerialized] public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
+		//[NonSerialized] public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
 		public string name { get; private set; }
 		public bool isDir { get; }
 
@@ -75,6 +75,8 @@ namespace CustomFS
 		public byte[] encryptedData;
 		public byte[] signedChecksum; // encryptedData is hashed and then signed
 		public byte[] folderContentsSignature; // used to verify the integrity of a folder
+
+		[NonSerialized] private bool decrypted = false;
 
 		// files: serialize metadata, convert it into byte array and encrypt it.The same byte array will also be signed with the RSA key.
 
@@ -97,9 +99,7 @@ namespace CustomFS
 		/// <param name="keyPair">Keypair used for signing.</param>
 		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			if (modified == false)
-				return;
-			modified = false;
+			decrypted = false;
 			// convert metadata into a byte array
 			byte[] metadataBytes = null;
 			serializeMetadata(ref metadataBytes);
@@ -117,15 +117,15 @@ namespace CustomFS
 
 		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			if (signedChecksum == null)
+			if (decrypted == true)
 				return; // already decrypted
 
 
 			if (CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
-				throw new InvalidSignature();
+				throw new InvalidSignature(name);
 
 			
-			signedChecksum = null;
+			//signedChecksum = null;
 
 			byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
 
@@ -134,44 +134,31 @@ namespace CustomFS
 			{
 				metadata = (FileMetadata)bf.Deserialize(ms);
 			}
-			IV = null;
-			encryptedData = null;
+			//IV = null;
+			//encryptedData = null;
 			
 			if(isDir == true)
             {
 				// check the integrity of folder contents
 				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
 				if (CryptoUtilities.signVerify(ref folderContentsSignature, false, folderContentsHash, keyPair.Public, hashingAlgorithm) == false)
-					throw new InvalidSignature();
+					throw new InvalidSignature(name);
 				folderContentsSignature = null;
             }
-			if (metadata.name != name || metadata.isDir != isDir || metadata.parentAbsolutePath != parentDir.metadata.absolutePath)
-				throw new DataCorruption();
+			if (metadata.name != name || metadata.isDir != isDir)
+				throw new DataCorruption(name);
+			if(parentDir != null && (metadata.parentAbsolutePath != parentDir.metadata.absolutePath))
+				throw new DataCorruption(name);
+
+			decrypted = true;
 		}
-		private void serializeMetadata(ref byte[] metadataBytes)
-		{
-			using (var memoryStream = new MemoryStream())
-			{
-				// Serialize to memory instead of to file
-				var formatter = new BinaryFormatter();
-				formatter.Serialize(memoryStream, metadata);
-
-				// This resets the memory stream position for the following read operation
-				memoryStream.Seek(0, SeekOrigin.Begin);
-
-				// Get the bytes
-				metadataBytes = new byte[memoryStream.Length];
-				memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
-			}
-		}
-
 		/// <summary>
 		/// Hashes folder metadata and File.name - File.isDir pairs.
 		/// </summary>
 		/// <param name="folder">Starting folder.</param>
 		/// <returns>Hash of all name and isDir pairs</returns>
 		private byte[] hashFolderContents(BTree folder, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
-        {
+		{
 			List<File> dirContents;
 			folder.traverse(out dirContents);
 
@@ -199,6 +186,25 @@ namespace CustomFS
 			}
 			return dataToSign;
 		}
+
+
+		private void serializeMetadata(ref byte[] metadataBytes)
+		{
+			using (var memoryStream = new MemoryStream())
+			{
+				// Serialize to memory instead of to file
+				var formatter = new BinaryFormatter();
+				formatter.Serialize(memoryStream, metadata);
+
+				// This resets the memory stream position for the following read operation
+				memoryStream.Seek(0, SeekOrigin.Begin);
+
+				// Get the bytes
+				metadataBytes = new byte[memoryStream.Length];
+				memoryStream.Read(metadataBytes, 0, (int)memoryStream.Length);
+			}
+		}
+
 
 		public File(string name, File parentDir, bool isDir, DateTime creationTime)
         {
@@ -244,7 +250,18 @@ namespace CustomFS
         }*/
         public override string ToString()
         {
-			return metadata.name;
-        }
-    }
+			char fileType = (isDir == true) ? 'd' : 'f';
+			return "(" + fileType + ") " + name;
+		}
+
+		/*public FileMetadata getMetadata(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
+        {
+			if (decrypted == true)
+				return metadata;
+
+			decrypt(symmetricKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+
+			return metadata;
+        }*/
+	}
 }
