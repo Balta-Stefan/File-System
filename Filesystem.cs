@@ -45,7 +45,7 @@ namespace CustomFS
             if (Directory.Exists(downloadFolderName) == false)
                 Directory.CreateDirectory(downloadFolderName);
 
-            if (root == null)
+            if (oldFS == null)
             {
                 currentFolder = root = new File(Path.DirectorySeparatorChar.ToString(), null, true, DateTime.Now);
                 uploadFolder = new File(uploadFolderName, root, true, DateTime.Now);
@@ -71,9 +71,12 @@ namespace CustomFS
         /// <param name="parentDir">Parent folder.</param>
         /// <param name="name">Name of the wanted file.</param>
         /// <returns>The wanted file.</returns>
-        public File downloadFile(string fileName)
+        public File downloadFile(string fileName, File wantedFile = null)
         {
-            File wantedFile = findFile(fileName);
+            //File wantedFile = findFile(fileName);
+            if (wantedFile == null)
+                wantedFile = findFile(fileName);
+
             if (wantedFile == null)
                 throw new Exception("Wanted file doesn't exist.");
 
@@ -120,6 +123,7 @@ namespace CustomFS
                 newFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
                 uploadFolder.directoryContents.insert(newFile);
+                uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
         }
 
@@ -235,12 +239,14 @@ namespace CustomFS
             if (destinationFile.directoryContents.search(fileName) != null)
                 throw new Exception("File already exists!");
 
-            requiresEncryption.Add(sourceFile.parentDir);
-            requiresEncryption.Add(sourceFile);
-            requiresEncryption.Add(destinationFile);
-
-            sourceFile.parentDir = destinationFile;
+            sourceFile.parentDir.directoryContents.remove(sourceFile); // remove the file from the old location
+            sourceFile.changeParentDir(destinationFile);
+            //sourceFile.parentDir = destinationFile;
             destinationFile.directoryContents.insert(sourceFile);
+
+            sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
             return true;
         }
@@ -277,6 +283,7 @@ namespace CustomFS
                 return false;
 
             toRemove.parentDir.directoryContents.remove(toRemove);
+            toRemove.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             requiresEncryption.Add(toRemove.parentDir);
 
             return true;
@@ -312,25 +319,32 @@ namespace CustomFS
             File newDir = new File(dirName, parentDir, true, DateTime.Now);
             parentDir.directoryContents.insert(newDir);
 
-            requiresEncryption.Add(newDir);
-            requiresEncryption.Add(parentDir);
+            newDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
         }
 
-        public void makeTextFile(File parentDir, string fileName, string contents)
+        /// <summary>
+        /// Create text file in the working directory.
+        /// </summary>
+        /// <param name="fileName"></param>
+        /// <param name="contents"></param>
+        public void makeTextFile(string fileName, string contents)
         {
             if(fileName.EndsWith(".txt") == false)
                 fileName += ".txt";
 
-            if (parentDir.directoryContents.search(fileName) != null)
+            if (currentFolder.directoryContents.search(fileName) != null)
                 throw new Exception("File already exists");
 
-            File newFile = new File(fileName, parentDir, false, DateTime.Now);
+            File newFile = new File(fileName, currentFolder, false, DateTime.Now);
             newFile.metadata.data = Encoding.UTF8.GetBytes(contents);
 
-            parentDir.directoryContents.insert(newFile);
+            currentFolder.directoryContents.insert(newFile);
 
-            requiresEncryption.Add(parentDir);
-            requiresEncryption.Add(newFile);
+            currentFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            newFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            //requiresEncryption.Add(parentDir);
+            //requiresEncryption.Add(newFile);
         }
 
 

@@ -41,8 +41,9 @@ namespace CustomFS
 				dateCreated = creationTime;
 				if(parentDir != null)
                 {
-					absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+					parentDir = parentDir;
 					parentAbsolutePath = parentDir.metadata.absolutePath;
+					absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
 				}
 				else
                 {
@@ -54,6 +55,12 @@ namespace CustomFS
 
 
 		}
+		public void changeParentDir(File newParent)
+        {
+			parentDir = newParent;
+			metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
+			metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+        }
 		public void changeName(string newName)
 		{
 			name = newName;

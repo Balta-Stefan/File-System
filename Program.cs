@@ -541,11 +541,11 @@ namespace CustomFS
             string fileName = Console.ReadLine();
 
             Console.WriteLine("Enter the contents:");
-            string contents = Console.ReadLine();
+            string contents = enterText();//Console.ReadLine();
 
             try
             {
-                filesystem.makeTextFile(workingDirectory, fileName, contents);
+                filesystem.makeTextFile(fileName, contents);
             }
             catch(Exception e)
             {
@@ -564,33 +564,23 @@ namespace CustomFS
                     Console.Write(charArray[i]);
             }
         }
-        private void editTextFile(string fileName)
+
+        /// <summary>
+        /// Method which will be used for text file editing and creation.
+        /// </summary>
+        /// <param name="textArray">Additional text.</param>
+        /// <returns></returns>
+        string enterText(char[] textArray = null)
         {
-            try
-            {
-                filesystem.downloadFile(fileName);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine(e.Message);
-                return;
-            }
-            finally
-            {
-                foreach (string s in filesystem.getMessages())
-                    Console.WriteLine(s);
-            }
+            int limit = 0;
+            if (textArray == null)
+                textArray = new char[15];
+            else
+                limit = textArray.Length;
+                
 
-            
-            File wantedFile = filesystem.findFile(fileName);
-            string text = System.IO.File.ReadAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
-            char[] textArray = text.ToCharArray();
-            int limit = text.Length;
-
+            Console.Clear();
             editTextFileUtility(textArray, limit);
-
-         
-
             ConsoleKeyInfo key;
             do
             {
@@ -639,7 +629,48 @@ namespace CustomFS
 
             char[] finalArray = new char[limit];
             Array.Copy(textArray, finalArray, limit);
-            string str = new string(finalArray);
+
+            return new string(finalArray);
+        }
+        private void editTextFile(string fileName)
+        {
+            File wantedFile = filesystem.findFile(fileName);
+            try
+            {
+                if(wantedFile == null)
+                {
+                    Console.WriteLine("Given path doesn't exist.");
+                    return;
+                }
+                if (wantedFile.isDir == true)
+                {
+                    Console.WriteLine("Given path represents a directory.");
+                    return;
+                }
+                if (wantedFile.name.EndsWith(".txt") == false)
+                {
+                    Console.WriteLine("Given path doesn't represent a text file.");
+                    return;
+                }
+                filesystem.downloadFile(fileName);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                return;
+            }
+            finally
+            {
+                foreach (string s in filesystem.getMessages())
+                    Console.WriteLine(s);
+            }
+
+            
+            string text = System.IO.File.ReadAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
+            char[] textArray = text.ToCharArray();
+            int limit = text.Length;
+
+            string str = enterText(textArray);
 
             // write string to file
             System.IO.File.WriteAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName, str);
@@ -656,7 +687,7 @@ namespace CustomFS
         private void move(string arg)
         {
             // arg should contain 2 paths separated by space, each specified between double quotes ("first" "second")
-           
+
             if(arg.Length < 5)
             {
                 Console.WriteLine("Incorrect arguments.Specify them as \"first path\" \"second path\"");
@@ -676,8 +707,9 @@ namespace CustomFS
 
             try
             {
-                sourcePath = arg.Substring(1, secondQuote - 1);
-                destinationPath = arg.Substring(secondQuote + 2);
+                sourcePath = arg.Substring(0, secondQuote);
+                destinationPath = arg.Substring(secondQuote + 3);
+                destinationPath = destinationPath.Substring(0, destinationPath.Length-1); // remove the last quote
             }
             catch(Exception)
             {
@@ -745,6 +777,11 @@ namespace CustomFS
                 Console.Clear();
                 return;
             }
+            else if(command.Equals("maketext"))
+            {
+                makeTextFile();
+                return;
+            }
 
             if (parts == null || parts.Length < 2)
             {
@@ -763,9 +800,6 @@ namespace CustomFS
                         break;
                     case "mv":
                         move(command.Substring(3));
-                        break;
-                    case "maketext":
-                        makeTextFile();
                         break;
                     case "edit":
                         editTextFile(command.Substring(5));
