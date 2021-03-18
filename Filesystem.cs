@@ -21,9 +21,11 @@ namespace CustomFS
 
         private readonly File root;
         private readonly File uploadFolder;
+        private readonly File sharedFolder;
         [NonSerialized] private File currentFolder;
         public static readonly string uploadFolderName = "upload";
         public static readonly string downloadFolderName = "download";
+        public static readonly string sharedFolderName = "shared";
 
 
         [NonSerialized] private byte[] encryptionKey;
@@ -33,12 +35,13 @@ namespace CustomFS
         [NonSerialized] private readonly Queue<string> messageQueue = new Queue<string>();
 
         private readonly List<File> requiresEncryption = new List<File>();
-        public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Filesystem oldFS = null)
+        public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, File sharedFolder, Filesystem oldFS = null)
         {
             this.encryptionKey = encryptionKey;
             this.hashingAlgorithm = hashingAlgorithm;
             this.encryptionAlgorithm = encryptionAlgorithm;
             this.keyPair = keyPair;
+            this.sharedFolder = sharedFolder;
 
             if (Directory.Exists(uploadFolderName) == false)
                 Directory.CreateDirectory(uploadFolderName);
@@ -48,14 +51,31 @@ namespace CustomFS
             if (oldFS == null)
             {
                 currentFolder = root = new File(Path.DirectorySeparatorChar.ToString(), null, true, DateTime.Now);
+                sharedFolder = new File(sharedFolderName, root, true, DateTime.Now);
                 uploadFolder = new File(uploadFolderName, root, true, DateTime.Now);
                 root.directoryContents.insert(uploadFolder);
-
-                uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-                root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+                //uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+                //root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
             else
+            {
                 currentFolder = root = oldFS.root;
+                root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            }
+        }
+
+        public void checkEncryptionUtility(File file)
+        {
+            if(file.requiresEncryption == false)
+            {
+                file.requiresEncryption = true;
+                requiresEncryption.Add(file);
+            }
+        }
+
+        public void addToShared(File file)
+        {
+            sharedFolder.directoryContents.insert(file);
         }
 
         public Queue<string> getMessages()
@@ -244,9 +264,9 @@ namespace CustomFS
             //sourceFile.parentDir = destinationFile;
             destinationFile.directoryContents.insert(sourceFile);
 
-            sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-            sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-            destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            //sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            //sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            //destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
             return true;
         }
@@ -284,7 +304,7 @@ namespace CustomFS
 
             toRemove.parentDir.directoryContents.remove(toRemove);
             toRemove.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-            requiresEncryption.Add(toRemove.parentDir);
+            //requiresEncryption.Add(toRemove.parentDir);
 
             return true;
         }
@@ -293,7 +313,7 @@ namespace CustomFS
         {
             string dirName = Path.GetFileName(path);
             if(path.IndexOf(Path.DirectorySeparatorChar) == -1)
-                return root; // this will be a problem when dealing with relative paths
+                return currentFolder; // this will be a problem when dealing with relative paths
             
             int toRemoveLength = 1 + dirName.Length; // 1 is added because of path separator (slash)
 
@@ -340,9 +360,10 @@ namespace CustomFS
             newFile.metadata.data = Encoding.UTF8.GetBytes(contents);
 
             currentFolder.directoryContents.insert(newFile);
+            //currentFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
-            currentFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             newFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+            currentFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //requiresEncryption.Add(parentDir);
             //requiresEncryption.Add(newFile);
         }
@@ -350,6 +371,11 @@ namespace CustomFS
 
         public void encryptFileSystem()
         {
+            // remove the shared folder
+            root.directoryContents.remove(sharedFolder);
+            if (root.requiresEncryption == false)
+                requiresEncryption.Add(root);
+
             foreach (File f in requiresEncryption)
                 f.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 

@@ -69,7 +69,6 @@ namespace CustomFS
     }
     class Program
     {
-        private string userDatabaseFilename = "User database.bin";
         private Dictionary<string, hashedPassword> database = null;
 
         public byte[] encryptionKey;
@@ -82,7 +81,11 @@ namespace CustomFS
         public File root;
         public readonly List<File> requireEncryption = new List<File>();
 
-        private static readonly string CAfile = "CA.pem";
+        private static readonly string CAfilename = "CA.pem";
+        private string userDatabaseFilename = "User database.bin";
+        private static readonly string serializationFilename = "Filesystem.bin";
+        private static readonly string sharedFilename = "shared.bin";
+
 
         byte[] inputPassword()
         {
@@ -160,7 +163,7 @@ namespace CustomFS
             Console.WriteLine("Input the name of the certificate in PEM format:");
             string certFilename = "mojKlijent.pem";// Console.ReadLine();
 
-            if(certFilename.Equals(CAfile))
+            if(certFilename.Equals(CAfilename))
                 throw new Exception("Can't use CA's own certificate!");
             
 
@@ -191,7 +194,7 @@ namespace CustomFS
                 // validate the certificate 
 
                 X509Certificate rootCert = null;
-                fileStream = System.IO.File.OpenText(CAfile);
+                fileStream = System.IO.File.OpenText(CAfilename);
                 reader = new PemReader(fileStream);
                 try
                 {
@@ -665,21 +668,39 @@ namespace CustomFS
                     Console.WriteLine(s);
             }
 
-            
-            string text = System.IO.File.ReadAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
+            string text = null;
+            try
+            {
+                text = System.IO.File.ReadAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + wantedFile.name);
+            }
+            catch(Exception)
+            {
+                Console.WriteLine("Error reading the downloaded file.");
+                return;
+            }
+
             char[] textArray = text.ToCharArray();
-            int limit = text.Length;
+            //int limit = text.Length;
 
             string str = enterText(textArray);
 
             // write string to file
-            System.IO.File.WriteAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName, str);
+            try
+            {
+                System.IO.File.WriteAllText(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + wantedFile.name, str);
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Error writing the downloaded file.");
+                return;
+            }
 
             // convert file to MemoryStream
             using (MemoryStream fileStream = loadFile(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName))
             {
                 wantedFile.metadata.data = fileStream.ToArray();
-                requireEncryption.Add(wantedFile);
+                //requireEncryption.Add(wantedFile);
+                filesystem.checkEncryptionUtility(wantedFile);
                 System.IO.File.Delete(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
             }
         }
@@ -825,27 +846,28 @@ namespace CustomFS
             }
         }
         
-        void deserializeFilesystem()
+        object deserializeFile(string fileName)
         {
             try
             {
-                using (FileStream stream = new FileStream("Filesystem.bin", FileMode.Open, FileAccess.Read, FileShare.None))
+                using (FileStream stream = new FileStream(fileName, FileMode.Open, FileAccess.Read, FileShare.None))
                 {
                     BinaryFormatter bf = new BinaryFormatter();
-
-                    Filesystem tempFS = (Filesystem)bf.Deserialize(stream);
-                    filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, tempFS);
+                    return bf.Deserialize(stream);
+                    //Filesystem tempFS = (Filesystem)bf.Deserialize(stream);
+                    //filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, tempFS);
                 }
             }
             catch(Exception)
             {
-                filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair); // nothing to deserialize
+                //filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair); // nothing to deserialize
+                return null;
             }
         }
 
-        void serializeFileSystem()
+        void serializeFile(string fileName)
         {
-            using (FileStream stream = new FileStream("Filesystem.bin", FileMode.OpenOrCreate)) 
+            using (FileStream stream = new FileStream(fileName, FileMode.OpenOrCreate)) 
             {
                 BinaryFormatter formatter = new BinaryFormatter();
                 formatter.Serialize(stream, filesystem);
@@ -868,7 +890,16 @@ namespace CustomFS
                     Console.WriteLine(e.Message);
                 }
             }
-            obj.deserializeFilesystem();
+            File sharedFolder = (File)obj.deserializeFile(sharedFilename);
+            if(sharedFolder == null)
+                sharedFolder = new File(Filesystem.sharedFolderName, null, true, DateTime.Now);
+            
+
+            Filesystem tempFS = (Filesystem)obj.deserializeFile(serializationFilename);
+            if (tempFS == null)
+                tempFS = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder);
+
+            obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder, tempFS);
 
             //obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair);
 
@@ -878,7 +909,7 @@ namespace CustomFS
                 if (command.Equals("exit"))
                 {
                     obj.filesystem.encryptFileSystem();
-                    obj.serializeFileSystem();
+                    obj.serializeFile(serializationFilename);
                     return;
                 }
                 else if(command.Equals("help"))

@@ -27,11 +27,12 @@ namespace CustomFS
 			// the problem here is that parentDir and directoryContents aren't included in the integrity check.Fix this in the future.
 
 			public string name;
-			public bool isDir;
+			public readonly bool isDir;
 			public string absolutePath;
 			public DateTime dateCreated { get; private set; }
 			public byte[] data; //null if isDir == true
 			public string parentAbsolutePath;
+
 			//public bool alreadyWritten = false;
 
 			public FileMetadata(string name, bool isDir, DateTime creationTime, File parentDir)
@@ -41,9 +42,11 @@ namespace CustomFS
 				dateCreated = creationTime;
 				if(parentDir != null)
                 {
-					parentDir = parentDir;
 					parentAbsolutePath = parentDir.metadata.absolutePath;
-					absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+					if (parentDir.metadata.name.Equals(Path.DirectorySeparatorChar) == false)
+						absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+					else
+						absolutePath = Path.DirectorySeparatorChar + name; // parent is the root
 				}
 				else
                 {
@@ -52,20 +55,8 @@ namespace CustomFS
 					parentAbsolutePath = "";
                 }
 			}
-
-
 		}
-		public void changeParentDir(File newParent)
-        {
-			parentDir = newParent;
-			metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
-			metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
-        }
-		public void changeName(string newName)
-		{
-			name = newName;
-			metadata.name = newName;
-		}
+
 
 
 		[NonSerialized] public FileMetadata metadata = null; // { get; private set;  }
@@ -83,7 +74,7 @@ namespace CustomFS
 		public byte[] signedChecksum; // encryptedData is hashed and then signed
 		public byte[] folderContentsSignature; // used to verify the integrity of a folder
 
-		[NonSerialized] private bool decrypted = false;
+		[NonSerialized] public bool requiresEncryption = true;
 
 		// files: serialize metadata, convert it into byte array and encrypt it.The same byte array will also be signed with the RSA key.
 
@@ -98,6 +89,18 @@ namespace CustomFS
 		// when a folder is opened, its integrity must be verified.It wouldn't make sense to decrypt all the files and folders.Some metadata has to be moved out of the FileMetadata into the File.
 		// that metadata is the filename and isDir flag.
 
+		public void changeParentDir(File newParent)
+		{
+			parentDir = newParent;
+			metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
+			metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+		}
+		public void changeName(string newName)
+		{
+			name = newName;
+			metadata.name = newName;
+		}
+
 		/// <summary>
 		/// Encrypt the file or folder.
 		/// </summary>
@@ -106,7 +109,9 @@ namespace CustomFS
 		/// <param name="keyPair">Keypair used for signing.</param>
 		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			decrypted = false;
+			if (requiresEncryption == false)
+				return;
+			requiresEncryption = false;
 			// convert metadata into a byte array
 			byte[] metadataBytes = null;
 			serializeMetadata(ref metadataBytes);
@@ -124,7 +129,7 @@ namespace CustomFS
 
 		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
-			if (decrypted == true)
+			if (metadata != null)
 				return; // already decrypted
 
 
@@ -157,7 +162,6 @@ namespace CustomFS
 			if(parentDir != null && (metadata.parentAbsolutePath != parentDir.metadata.absolutePath))
 				throw new DataCorruption(name);
 
-			decrypted = true;
 		}
 		/// <summary>
 		/// Hashes folder metadata and File.name - File.isDir pairs.
@@ -219,7 +223,6 @@ namespace CustomFS
 			this.name = name;
 			this.isDir = isDir;
 			this.parentDir = parentDir;
-
 
 			if (isDir == true)
 				directoryContents = new BTree();
