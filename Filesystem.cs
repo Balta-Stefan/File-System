@@ -51,14 +51,19 @@ namespace CustomFS
             if (oldFS == null)
             {
                 currentFolder = root = new File(Path.DirectorySeparatorChar.ToString(), null, true, DateTime.Now);
-                sharedFolder = new File(sharedFolderName, root, true, DateTime.Now);
+                this.sharedFolder = sharedFolder;// new File(sharedFolderName, root, true, DateTime.Now);
                 uploadFolder = new File(uploadFolderName, root, true, DateTime.Now);
-                root.directoryContents.insert(uploadFolder);
+                root.insertNewFile(uploadFolder);
+                //root.directoryContents.insert(uploadFolder);
+                uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+                root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
                 //uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
                 //root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
             else
             {
+                uploadFolder = oldFS.uploadFolder;
+                sharedFolder = oldFS.sharedFolder;
                 currentFolder = root = oldFS.root;
                 root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
@@ -75,7 +80,8 @@ namespace CustomFS
 
         public void addToShared(File file)
         {
-            sharedFolder.directoryContents.insert(file);
+            sharedFolder.insertNewFile(file);
+            //sharedFolder.directoryContents.insert(file);
         }
 
         public Queue<string> getMessages()
@@ -103,14 +109,14 @@ namespace CustomFS
             // first decrypt the file
             wantedFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
 
-            if (wantedFile == null || wantedFile.isDir == true)
-                return null;
+            if (wantedFile.isDir == true)
+                throw new Exception("Cannot download folders!");
 
             if (Directory.Exists(downloadFolderName) == false)
                 Directory.CreateDirectory(downloadFolderName);
 
             // create the file
-            using (MemoryStream stream = new MemoryStream(wantedFile.metadata.data))
+            using (MemoryStream stream = new MemoryStream(wantedFile.getData()))
             {
                 using (FileStream file = new FileStream(downloadFolderName + Path.DirectorySeparatorChar + wantedFile.name, FileMode.Create, System.IO.FileAccess.Write))
                     stream.CopyTo(file);
@@ -137,12 +143,14 @@ namespace CustomFS
             using (MemoryStream fileStream = loadFile(uploadFolderName + Path.DirectorySeparatorChar + fileName))
             {
                 // Encrypt and sign the file.
+                uploadFolder.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
                 File newFile = new File(fileName, uploadFolder, false, DateTime.Now);
-                newFile.metadata.data = fileStream.ToArray();
+                newFile.setData(fileStream.ToArray());
 
                 newFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
-                uploadFolder.directoryContents.insert(newFile);
+                uploadFolder.insertNewFile(newFile);
+                //uploadFolder.directoryContents.insert(newFile);
                 uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
         }
@@ -157,6 +165,11 @@ namespace CustomFS
             inMemoryCopy.Position = 0;
 
             return inMemoryCopy;
+        }
+
+        public string getCurrentPath()
+        {
+            return currentFolder.getAbsolutePath();
         }
 
         /*
@@ -214,7 +227,9 @@ namespace CustomFS
                 {
                     messageQueue.Enqueue(e.Message);
                 }
-                currentPath = currentPath.directoryContents.search(source[i]);
+
+                currentPath = currentPath.searchDirectory(source[i]);
+                //currentPath = currentPath.directoryContents.search(source[i]);
                 if (currentPath == null || currentPath.isDir == false)
                     return null;
             }
@@ -228,11 +243,13 @@ namespace CustomFS
                 {
                     messageQueue.Enqueue(e.Message);
                 }
-                wantedFile = currentPath.directoryContents.search(source[i]); // this is either a directory or a file, everything before this was a directory.
+                wantedFile = currentPath.searchDirectory(source[i]);
+                //wantedFile = currentPath.directoryContents.search(source[i]); // this is either a directory or a file, everything before this was a directory.
             }
 
             return wantedFile;
         }
+
 
         /// <summary>
         /// 
@@ -256,13 +273,17 @@ namespace CustomFS
             if (destinationFile.isDir == false)
                 throw new Exception("Destination isn't a folder!");
 
-            if (destinationFile.directoryContents.search(fileName) != null)
+            if (destinationFile.searchDirectory(fileName) != null)
                 throw new Exception("File already exists!");
 
-            sourceFile.parentDir.directoryContents.remove(sourceFile); // remove the file from the old location
+            sourceFile.parentDir.deleteFile(sourceFile); // remove the file from the old location
+            sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             sourceFile.changeParentDir(destinationFile);
+            sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //sourceFile.parentDir = destinationFile;
-            destinationFile.directoryContents.insert(sourceFile);
+            destinationFile.insertNewFile(sourceFile);
+            destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+
 
             //sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -292,21 +313,22 @@ namespace CustomFS
                 return false;
 
             currentFolder = newDir;
+            currentFolder.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             return true;
         }
    
-        public bool removeFile(string path)
+        public void removeFile(string path)
         {
             File toRemove = findFile(path);
+            if (toRemove == uploadFolder)
+                throw new Exception("Cannot remove the upload folder!");
 
             if (toRemove == null)
-                return false;
+                throw new Exception("Requested file doesn't exist!");
 
-            toRemove.parentDir.directoryContents.remove(toRemove);
+            toRemove.parentDir.deleteFile(toRemove);
             toRemove.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //requiresEncryption.Add(toRemove.parentDir);
-
-            return true;
         }
     
         private File findParent(string path)
@@ -336,8 +358,9 @@ namespace CustomFS
             if (parentDir.isDir == false)
                 throw new Exception("Parent isn't a directory.");
 
+            parentDir.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             File newDir = new File(dirName, parentDir, true, DateTime.Now);
-            parentDir.directoryContents.insert(newDir);
+            parentDir.insertNewFile(newDir);
 
             newDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -353,13 +376,13 @@ namespace CustomFS
             if(fileName.EndsWith(".txt") == false)
                 fileName += ".txt";
 
-            if (currentFolder.directoryContents.search(fileName) != null)
+            if (currentFolder.searchDirectory(fileName) != null)
                 throw new Exception("File already exists");
 
             File newFile = new File(fileName, currentFolder, false, DateTime.Now);
-            newFile.metadata.data = Encoding.UTF8.GetBytes(contents);
+            newFile.setData(Encoding.UTF8.GetBytes(contents));
 
-            currentFolder.directoryContents.insert(newFile);
+            currentFolder.insertNewFile(newFile);
             //currentFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
             newFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -372,9 +395,8 @@ namespace CustomFS
         public void encryptFileSystem()
         {
             // remove the shared folder
-            root.directoryContents.remove(sharedFolder);
-            if (root.requiresEncryption == false)
-                requiresEncryption.Add(root);
+            root.deleteFile(sharedFolder);
+            root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
 
             foreach (File f in requiresEncryption)
                 f.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -385,14 +407,9 @@ namespace CustomFS
         public List<File> listWorkingDirectory()
         {
             List<File> files;
-            currentFolder.directoryContents.traverse(out files);
+            currentFolder.traverseDirectory(out files);
 
             return files;
-        }
-
-        public string currentPath()
-        {
-            return currentFolder.metadata.absolutePath;
         }
     }
 }

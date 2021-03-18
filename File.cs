@@ -35,6 +35,9 @@ namespace CustomFS
 
 			//public bool alreadyWritten = false;
 
+			/// <summary>
+			/// parentDir must be decrypted!.
+			/// </summary>
 			public FileMetadata(string name, bool isDir, DateTime creationTime, File parentDir)
 			{
 				this.name = name;
@@ -43,7 +46,7 @@ namespace CustomFS
 				if(parentDir != null)
                 {
 					parentAbsolutePath = parentDir.metadata.absolutePath;
-					if (parentDir.metadata.name.Equals(Path.DirectorySeparatorChar) == false)
+					if (parentAbsolutePath.Equals(Path.DirectorySeparatorChar.ToString()) == false)
 						absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
 					else
 						absolutePath = Path.DirectorySeparatorChar + name; // parent is the root
@@ -59,14 +62,14 @@ namespace CustomFS
 
 
 
-		[NonSerialized] public FileMetadata metadata = null; // { get; private set;  }
+		[NonSerialized] private FileMetadata metadata = null; // { get; private set;  }
 
 		//[NonSerialized] public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
 		public string name { get; private set; }
 		public bool isDir { get; }
 
 		public File parentDir;
-		public BTree directoryContents { get; } //used only for directories
+		private BTree directoryContents { get; } //used only for directories
 
 		// cryptography related
 		public byte[] IV;
@@ -89,11 +92,59 @@ namespace CustomFS
 		// when a folder is opened, its integrity must be verified.It wouldn't make sense to decrypt all the files and folders.Some metadata has to be moved out of the FileMetadata into the File.
 		// that metadata is the filename and isDir flag.
 
+		/// <summary>
+		/// Only for directories.Used to insert new file to this directory.
+		/// </summary>
+		/// <param name="file"></param>
+		public void insertNewFile(File file)
+        {
+			directoryContents.insert(file);
+			requiresEncryption = true;
+        }
+
+		public File searchDirectory(string file)
+        {
+			return directoryContents.search(file);
+        }
+
+		public void deleteFile(File file)
+        {
+			directoryContents.remove(file);
+			requiresEncryption = true;
+        }
+
+		public void traverseDirectory(out List<File> list)
+        {
+			directoryContents.traverse(out list);
+        }
+
+		/// <summary>
+		/// Get data of this file.
+		/// </summary>
+		/// <remarks>Check whether the file is decrypted before calling this method.</remarks>
+		/// <returns></returns>
+		public byte[] getData()
+        {
+			return (byte[])metadata.data.Clone();
+        }
+
+		/// <remarks>Check whether the file is decrypted before calling this method.</remarks>
+		/// <param name="newData"></param>
+		public void setData(byte[] newData)
+        {
+			metadata.data = newData;
+        }
+		public string getAbsolutePath()
+        {
+			return metadata.absolutePath;
+        }
 		public void changeParentDir(File newParent)
 		{
 			parentDir = newParent;
 			metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
 			metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+
+			requiresEncryption = true;
 		}
 		public void changeName(string newName)
 		{
@@ -155,7 +206,7 @@ namespace CustomFS
 				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
 				if (CryptoUtilities.signVerify(ref folderContentsSignature, false, folderContentsHash, keyPair.Public, hashingAlgorithm) == false)
 					throw new InvalidSignature(name);
-				folderContentsSignature = null;
+				//folderContentsSignature = null;
             }
 			if (metadata.name != name || metadata.isDir != isDir)
 				throw new DataCorruption(name);
@@ -216,7 +267,10 @@ namespace CustomFS
 			}
 		}
 
-
+		/// <summary>
+		/// parentDir must be decrypted!.
+		/// </summary>
+		/// <param name="parentDir">Must be decrypted before calling this method.</param>
 		public File(string name, File parentDir, bool isDir, DateTime creationTime)
         {
 			metadata = new FileMetadata(name, isDir, creationTime, parentDir);
@@ -242,7 +296,7 @@ namespace CustomFS
 				return -1;*/
 
 			//both are files
-			return metadata.name.CompareTo(file.metadata.name);
+			return name.CompareTo(file.name);
         }
 
 		/*public override bool Equals(object obj)

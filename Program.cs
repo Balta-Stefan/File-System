@@ -485,7 +485,7 @@ namespace CustomFS
             // check if the file exists in the virtual filesystem
             try
             {
-                filesystem.downloadFile(fileName);
+                File toOpen = filesystem.downloadFile(fileName);
             }
             catch(Exception e)
             {
@@ -698,7 +698,8 @@ namespace CustomFS
             // convert file to MemoryStream
             using (MemoryStream fileStream = loadFile(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName))
             {
-                wantedFile.metadata.data = fileStream.ToArray();
+                wantedFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+                wantedFile.setData(fileStream.ToArray());
                 //requireEncryption.Add(wantedFile);
                 filesystem.checkEncryptionUtility(wantedFile);
                 System.IO.File.Delete(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
@@ -756,8 +757,14 @@ namespace CustomFS
         
         private void remove(string path)
         {
-            if (filesystem.removeFile(path) == false)
-                Console.WriteLine("Requested path doesn't exist.");
+            try
+            {
+                filesystem.removeFile(path);
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
          
             foreach (string s in filesystem.getMessages())
                 Console.WriteLine(s);
@@ -784,6 +791,11 @@ namespace CustomFS
                 Console.WriteLine(e.Message);
             }
         }
+
+        private void displayCurrentPath()
+        {
+            Console.WriteLine(filesystem.getCurrentPath());
+        }
         public void parseCommand(string command)
         {
             string[] parts = command.Split(' ');
@@ -801,6 +813,11 @@ namespace CustomFS
             else if(command.Equals("maketext"))
             {
                 makeTextFile();
+                return;
+            }
+            else if(command.Equals("pwd"))
+            {
+                displayCurrentPath();
                 return;
             }
 
@@ -896,10 +913,10 @@ namespace CustomFS
             
 
             Filesystem tempFS = (Filesystem)obj.deserializeFile(serializationFilename);
-            if (tempFS == null)
-                tempFS = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder);
-
-            obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder, tempFS);
+            if (tempFS != null)
+                obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder, tempFS);
+            else
+                obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder);
 
             //obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair);
 
@@ -914,7 +931,8 @@ namespace CustomFS
                 }
                 else if(command.Equals("help"))
                 {
-                    Console.WriteLine("open file_name - open a file");
+                    Console.WriteLine("open file_name - open a file with the default program");
+                    Console.WriteLine("pwd - display current path");
                     Console.WriteLine("mkdir path - create folder");
                     Console.WriteLine("mv source_path destination_path - move files/folders");
                     Console.WriteLine("maketext - create a txt file");
