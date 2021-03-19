@@ -18,6 +18,7 @@ namespace CustomFS
 
         // The user will have to manually move the file from the virtual upload folder to whenever he wants (inside virtual file system).
 
+        // Problem: whenever metadata is accessed, the file has to be decrypted first.This is a problem because most methods for file handling access the metadata.
 
         private readonly File root;
         private readonly File uploadFolder;
@@ -55,6 +56,8 @@ namespace CustomFS
                 uploadFolder = new File(uploadFolderName, root, true, DateTime.Now);
                 root.insertNewFile(uploadFolder);
                 //root.directoryContents.insert(uploadFolder);
+
+                // encryptions below are done because file signatures are checked whenever they are accessed
                 uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
                 root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
                 //uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -131,10 +134,15 @@ namespace CustomFS
         /// <returns>False if specified file doesn't exist or if it specifies a folder.True if file upload is successful.</returns>
         public void uploadFile(string fileName)
         {
-            if (System.IO.File.Exists(uploadFolderName + Path.DirectorySeparatorChar + fileName) == false)
-                throw new Exception("Specified file doesn't exist.");
             if (Directory.Exists(uploadFolderName + Path.DirectorySeparatorChar + fileName) == true)
                 throw new Exception("Specified file name is a directory.");
+
+            if (System.IO.File.Exists(uploadFolderName + Path.DirectorySeparatorChar + fileName) == false)
+                throw new Exception("Specified file doesn't exist.");
+
+            // check if such file already exists in the upload folder
+            if (findFile(fileName) != null)
+                throw new Exception("Such file already exists in the upload folder.");
 
 
             if (Directory.Exists(uploadFolderName) == false)
@@ -199,10 +207,16 @@ namespace CustomFS
 
             return true;
         }
-
+        /// <summary>
+        /// Returns the wanted file, if it exists, without decrypting it.The whole path from top to the wanted file will be decrypted.
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
         public File findFile(string path)
         {
             // parse the paths
+            if (path.Equals(Path.DirectorySeparatorChar.ToString()))
+                return root;
             string[] source = path.Split(Path.DirectorySeparatorChar);
 
             // if a path begins with a slash, treat it as absolute path
@@ -276,13 +290,20 @@ namespace CustomFS
             if (destinationFile.searchDirectory(fileName) != null)
                 throw new Exception("File already exists!");
 
+            // sourceFile.parentDir will be decrypted by the findFile method
             sourceFile.parentDir.deleteFile(sourceFile); // remove the file from the old location
-            sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-            sourceFile.changeParentDir(destinationFile);
-            sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
-            //sourceFile.parentDir = destinationFile;
+            sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm); // change the signature of the parent directory to avoid warnings of directory corruption
+
+            destinationFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm); // decrypt because the encryption below requires the file to be decrypted
             destinationFile.insertNewFile(sourceFile);
             destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
+
+            
+            sourceFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm); // decrypt because changeParentDir requires the parent to be decrypted
+            sourceFile.changeParentDir(destinationFile);
+            sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm); // encrypt the file and sign it after moving it
+
+            //sourceFile.parentDir = destinationFile;
 
 
             //sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);

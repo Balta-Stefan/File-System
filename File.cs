@@ -60,8 +60,6 @@ namespace CustomFS
 			}
 		}
 
-
-
 		[NonSerialized] private FileMetadata metadata = null; // { get; private set;  }
 
 		//[NonSerialized] public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
@@ -91,6 +89,8 @@ namespace CustomFS
 		// when files are modified (not counting the data byte array), checksum of the parent folder must be recalculated.
 		// when a folder is opened, its integrity must be verified.It wouldn't make sense to decrypt all the files and folders.Some metadata has to be moved out of the FileMetadata into the File.
 		// that metadata is the filename and isDir flag.
+
+
 
 		/// <summary>
 		/// Only for directories.Used to insert new file to this directory.
@@ -146,11 +146,11 @@ namespace CustomFS
 
 			requiresEncryption = true;
 		}
-		public void changeName(string newName)
+		/*public void changeName(string newName)
 		{
 			name = newName;
 			metadata.name = newName;
-		}
+		}*/
 
 		/// <summary>
 		/// Encrypt the file or folder.

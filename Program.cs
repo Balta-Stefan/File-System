@@ -483,9 +483,10 @@ namespace CustomFS
         private void openFile(string fileName)
         {
             // check if the file exists in the virtual filesystem
+            File toOpen;
             try
             {
-                File toOpen = filesystem.downloadFile(fileName);
+                toOpen = filesystem.downloadFile(fileName);
             }
             catch(Exception e)
             {
@@ -500,7 +501,7 @@ namespace CustomFS
 
             Process tempProcess = new Process
             {
-                StartInfo = new ProcessStartInfo(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName)
+                StartInfo = new ProcessStartInfo(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + toOpen.name)
                 {
                     UseShellExecute = true
                 }
