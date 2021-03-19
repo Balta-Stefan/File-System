@@ -499,6 +499,7 @@ namespace CustomFS
                     Console.WriteLine(s);
             }
 
+            // the program will block until this process is closed (WaitForExit() call)
             Process tempProcess = new Process
             {
                 StartInfo = new ProcessStartInfo(Filesystem.downloadFolderName + Path.DirectorySeparatorChar + toOpen.name)
@@ -801,25 +802,21 @@ namespace CustomFS
         {
             string[] parts = command.Split(' ');
 
-            if(command.Equals("ls"))
+            // commands without arguments
+            switch(command)
             {
-                listDir();
-                return;
-            }
-            else if(command.Equals("cls"))
-            {
-                Console.Clear();
-                return;
-            }
-            else if(command.Equals("maketext"))
-            {
-                makeTextFile();
-                return;
-            }
-            else if(command.Equals("pwd"))
-            {
-                displayCurrentPath();
-                return;
+                case "ls":
+                    listDir();
+                    return;
+                case "cls":
+                    Console.Clear();
+                    return;
+                case "maketext":
+                    makeTextFile();
+                    return;
+                case "pwd":
+                    displayCurrentPath();
+                    return;
             }
 
             if (parts == null || parts.Length < 2)

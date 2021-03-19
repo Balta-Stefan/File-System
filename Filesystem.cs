@@ -221,33 +221,50 @@ namespace CustomFS
 
             // if a path begins with a slash, treat it as absolute path
             // else, treat it as relative path such that the first element is the name of a file or folder in the current folder.
-            File wantedFile = null;
+            //File wantedFile = null;
             File currentPath;
 
-            if (source[0] == " ")
+            int loopCounter = 0;
+            if (source[0].Equals(string.Empty))
+            {
                 currentPath = root;// absolute path
+                loopCounter = 1;
+            }
             else
                 currentPath = currentFolder; // relative path
+            
+
+            // possibilities:
+            // absolute path
+            // example: \first\second\third
+            // search has to begin from the root and the next file that has to be searched within the root is at source[1]
+            // iterate from 1 to source.Length - 1 inclusively
+
+            // relative path
+            // example: first\second\third
+            // search has to begin from currentFolder, the next file that is searched for is at source[0]
+            // iterate from 0 to source.Length - 1 inclusively
 
 
-            int i = 0;
-            for (; i < source.Length - 1; i++)
+            for (; loopCounter <= source.Length - 1; loopCounter++) 
             {
                 try
                 {
+                    // is this decryption necessary at all?method searchDirectory doesn't need decrypted files.
                     currentPath.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
                 }
-                catch(Exception e)
+                catch (Exception e)
                 {
                     messageQueue.Enqueue(e.Message);
                 }
 
-                currentPath = currentPath.searchDirectory(source[i]);
+                currentPath = currentPath.searchDirectory(source[loopCounter]);
                 //currentPath = currentPath.directoryContents.search(source[i]);
-                if (currentPath == null || currentPath.isDir == false)
+                if ((currentPath == null || currentPath.isDir == false) && loopCounter != (source.Length - 1)) // this will cause problems if the last item is a file and not a directory
                     return null;
             }
-            if (i < source.Length)
+
+            /*if (i < source.Length)
             {
                 try
                 {
@@ -259,11 +276,10 @@ namespace CustomFS
                 }
                 wantedFile = currentPath.searchDirectory(source[i]);
                 //wantedFile = currentPath.directoryContents.search(source[i]); // this is either a directory or a file, everything before this was a directory.
-            }
+            }*/
 
-            return wantedFile;
+            return currentPath;
         }
-
 
         /// <summary>
         /// 
