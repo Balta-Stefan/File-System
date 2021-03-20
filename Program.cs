@@ -26,6 +26,7 @@ using static CustomFS.CryptoUtilities;
 
 namespace CustomFS
 {
+
     enum hashAlgorithm { first, second};
 
     [Serializable]
@@ -70,19 +71,21 @@ namespace CustomFS
     class Program
     {
         private Dictionary<string, hashedPassword> database = null;
+        private Dictionary<string, AsymmetricKeyParameter> usersPublicKeys = null;
 
         public byte[] encryptionKey;
         public AsymmetricCipherKeyPair keyPair;
         public integrityHashAlgorithm hashingAlgorithm;
         public encryptionAlgorithms encryptionAlgorithm;
         public Filesystem filesystem;
-        public File workingDirectory;
+        //public File workingDirectory;
 
-        public File root;
+        //public File root;
         public readonly List<File> requireEncryption = new List<File>();
 
         private static readonly string CAfilename = "CA.pem";
-        private string userDatabaseFilename = "User database.bin";
+        private static string userDatabaseFilename = "User database.bin";
+        private static string usersPublicKeysDatabaseFilename = "Public key database.bin";
         private static readonly string serializationFilename = "Filesystem.bin";
         private static readonly string sharedFilename = "shared.bin";
 
@@ -416,7 +419,7 @@ namespace CustomFS
                 Console.WriteLine("Error during user database serialization" + e);
             }
         }
-        private void deserializeDatabase() // call on program startup
+        private void deserializeLoginDatabase() // call on program startup
         {
             // deserialize the database
 
@@ -438,7 +441,27 @@ namespace CustomFS
             }
         }
 
+        private void deserializePublicKeyDatabase() // call on program startup
+        {
+            // the code is the same as in deserializeLoginDatabase()
 
+            Stream stream = null;
+            try
+            {
+                BinaryFormatter formatter = new BinaryFormatter();
+                stream = new FileStream(usersPublicKeysDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read);
+                usersPublicKeys = (Dictionary<string, AsymmetricKeyParameter>)formatter.Deserialize(stream);
+                stream.Close();
+            }
+            catch (System.IO.FileNotFoundException)
+            {
+                if (stream != null)
+                    stream.Close();
+
+                // create the database
+                usersPublicKeys = new Dictionary<string, AsymmetricKeyParameter>();
+            }
+        }
 
         private bool compareByteArrays(byte[] first, byte[] second)
         {
@@ -480,6 +503,71 @@ namespace CustomFS
             return new MemoryStream(bytes);
         }
 
+        public AsymmetricKeyParameter getUserPublicKey(string userName)
+        {
+            AsymmetricKeyParameter wantedKey = null;
+            usersPublicKeys.TryGetValue(userName, out wantedKey);
+            return wantedKey;
+        }
+        
+        /// <param name="toShareArgs">Format: "username of the receiver" "file path"</param>
+        public void shareFile(string toShareArgs)
+        {
+            // bool Filesystem.shareWith(string userName, File file)
+
+            if (toShareArgs.Length < 5)
+            {
+                Console.WriteLine("Incorrect arguments.Specify them as \"receiver\" \"file path\"");
+                return;
+            }
+
+            toShareArgs = toShareArgs.Substring(1);
+            int secondQuote = toShareArgs.IndexOf('"');
+
+            if (secondQuote == -1)
+            {
+                Console.WriteLine("Incorrect arguments.Specify them as \"receiver\" \"file path\"");
+                return;
+            }
+            string receiver, filePath;
+            AsymmetricKeyParameter receiverPublicKey;
+
+            try
+            {
+                receiver = toShareArgs.Substring(0, secondQuote);
+                filePath = toShareArgs.Substring(secondQuote + 3);
+                filePath = filePath.Substring(0, filePath.Length - 1); // remove the last quote
+
+                receiverPublicKey = getUserPublicKey(receiver);
+                if(receiverPublicKey == null)
+                {
+                    Console.WriteLine("Wanted user doesn't exist");
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Incorrect arguments.Specify them as \"receiver\" \"file path\"");
+                return;
+            }
+
+            try
+            {
+                File fileForSharing = filesystem.findFile(filePath);
+                if(fileForSharing == null)
+                {
+                    Console.WriteLine("Specified file doesn't exist.");
+                    return;
+                }
+
+                // share the file
+                filesystem.shareFile(fileForSharing, receiverPublicKey, encryptionAlgorithm, hashingAlgorithm);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+        }
         private void openFile(string fileName)
         {
             // check if the file exists in the virtual filesystem
@@ -718,7 +806,6 @@ namespace CustomFS
                 return;
             }
              
-
             arg = arg.Substring(1);
             int secondQuote = arg.IndexOf('"');
 
@@ -849,6 +936,9 @@ namespace CustomFS
                     case "upload":
                         uploadFile(command.Substring(7));
                         break;
+                    case "share":
+                        shareFile(command.Substring(6));
+                        break;
 
                     default:
                         Console.WriteLine("Unknown command.");
@@ -889,45 +979,47 @@ namespace CustomFS
             }
         }
 
-        static void Main(string[] args)
+        static void runProgram()
         {
             Program obj = new Program();
-            obj.deserializeDatabase();
-            while(true)
+            obj.deserializeLoginDatabase();
+            obj.deserializePublicKeyDatabase();
+
+            while (true)
             {
                 try
                 {
                     obj.login();
                     break;
                 }
-                catch(Exception e)
+                catch (Exception e)
                 {
                     Console.WriteLine(e.Message);
                 }
             }
             File sharedFolder = (File)obj.deserializeFile(sharedFilename);
-            if(sharedFolder == null)
+            if (sharedFolder == null)
                 sharedFolder = new File(Filesystem.sharedFolderName, null, true, DateTime.Now);
-            
+
 
             Filesystem tempFS = (Filesystem)obj.deserializeFile(serializationFilename);
             if (tempFS != null)
-                obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder, tempFS);
+                obj.filesystem = new Filesystem("student", obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder, tempFS);
             else
-                obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder);
+                obj.filesystem = new Filesystem("student", obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair, sharedFolder);
 
             //obj.filesystem = new Filesystem(obj.encryptionKey, obj.hashingAlgorithm, obj.encryptionAlgorithm, obj.keyPair);
 
-            while(true)
+            while (true)
             {
                 string command = Console.ReadLine();
                 if (command.Equals("exit"))
                 {
-                    obj.filesystem.encryptFileSystem();
+                    obj.filesystem.closeFilesystem();
                     obj.serializeFile(serializationFilename);
                     return;
                 }
-                else if(command.Equals("help"))
+                else if (command.Equals("help"))
                 {
                     Console.WriteLine("open file_name - open a file with the default program");
                     Console.WriteLine("pwd - display current path");
@@ -944,8 +1036,27 @@ namespace CustomFS
                 else
                     obj.parseCommand(command);
             }
-           
 
+        }
+        static void Main(string[] args)
+        {
+            runProgram();
+
+            
+            /*RsaKeyPairGenerator generator = new RsaKeyPairGenerator();
+            generator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
+            AsymmetricCipherKeyPair keypair = generator.GenerateKeyPair();
+            byte[] data = Encoding.UTF8.GetBytes("hello mate this is a secret message!");
+
+            byte[] encrypted = RSAOAEP(true, keypair.Private, data);
+
+            Array.Clear(data, 0, data.Length);
+            data = null;
+
+            byte[] decrypted = RSAOAEP(false, keypair.Public, encrypted);
+
+            Console.WriteLine(Encoding.UTF8.GetString(decrypted));*/
+           
             /*obj.deserializeDatabase(); // call on startup every time
 
             //obj.registerUser();

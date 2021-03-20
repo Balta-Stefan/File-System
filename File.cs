@@ -9,6 +9,13 @@ using System.Threading.Tasks;
 
 namespace CustomFS
 {
+	/// <summary>
+	/// Thrown when trying to work with a file that is encrypted.
+	/// </summary>
+	public class FileEncrypted : Exception
+    {
+		public FileEncrypted() : base("The file is encrypted.Decrypt it before performing operations on it.") { }
+    }
 	public class InvalidSignature : Exception
     {
 		public InvalidSignature(string fileName) : base("Invalid signature: " + fileName) { }
@@ -54,13 +61,30 @@ namespace CustomFS
 				else
                 {
 					// for root folder
-					absolutePath = Path.DirectorySeparatorChar.ToString();
+					absolutePath = name;// Path.DirectorySeparatorChar.ToString();
 					parentAbsolutePath = "";
                 }
 			}
 		}
 
+		[Serializable]
+		public class SharedFileMetadata
+        {
+			// IV, encrypted data and signed checksum will be in the outer class (File)
+			public readonly CryptoUtilities.encryptionAlgorithms encryptionAlgorithm;
+			public readonly CryptoUtilities.integrityHashAlgorithm hashingAlgorithm;
+			public readonly byte[] encryptedSymmetricKey; // encrypted with the receiver's public key
+
+			public SharedFileMetadata(CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, byte[] encryptedSymmetricKey)
+            {
+				this.encryptionAlgorithm = encryptionAlgorithm;
+				this.encryptedSymmetricKey = encryptedSymmetricKey;
+				this.hashingAlgorithm = hashingAlgorithm;
+			}
+		}
+
 		[NonSerialized] private FileMetadata metadata = null; // { get; private set;  }
+		public SharedFileMetadata sharedMetadata = null;
 
 		//[NonSerialized] public bool modified = false; // there's no need to encrypt and sign a file that hasn't been modified.If true, encrypt and sign the file.
 		public string name { get; private set; }
@@ -91,6 +115,21 @@ namespace CustomFS
 		// that metadata is the filename and isDir flag.
 
 
+		public void shareTheFile(AsymmetricKeyParameter publicKey, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
+        {
+			// generate an IV
+			int IVlength = CryptoUtilities.getIVlength(encryptionAlgorithm);
+
+			// generate a symmetric encryption key
+			byte[] key = new byte[CryptoUtilities.defaultSymmetricKeySize];
+			CryptoUtilities.getRandomData(key);
+			byte[] encryptedKey = CryptoUtilities.RSAOAEP(true, publicKey, key);
+
+			sharedMetadata = new SharedFileMetadata(encryptionAlgorithm, hashingAlgorithm, encryptedKey);
+
+			requiresEncryption = true;
+			encrypt(key, IVlength, publicKey, hashingAlgorithm, encryptionAlgorithm);
+        }
 
 		/// <summary>
 		/// Only for directories.Used to insert new file to this directory.
@@ -125,6 +164,8 @@ namespace CustomFS
 		/// <returns></returns>
 		public byte[] getData()
         {
+			if (metadata == null)
+				throw new FileEncrypted();
 			return (byte[])metadata.data.Clone();
         }
 
@@ -132,14 +173,20 @@ namespace CustomFS
 		/// <param name="newData"></param>
 		public void setData(byte[] newData)
         {
+			if (metadata == null)
+				throw new FileEncrypted();
 			metadata.data = newData;
         }
 		public string getAbsolutePath()
         {
+			if (metadata == null)
+				throw new FileEncrypted();
 			return metadata.absolutePath;
         }
 		public void changeParentDir(File newParent)
 		{
+			if (metadata == null)
+				throw new FileEncrypted();
 			parentDir = newParent;
 			metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
 			metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
@@ -157,8 +204,8 @@ namespace CustomFS
 		/// </summary>
 		/// <param name="encryptionKey">Key used for symmetric encryption.</param>
 		/// <param name="IVlength">Length of IV in bytes.</param>
-		/// <param name="keyPair">Keypair used for signing.</param>
-		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
+		/// <param name="key">Key used for signing.</param>
+		public void encrypt(byte[] encryptionKey, int IVlength, AsymmetricKeyParameter key, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
 			if (requiresEncryption == false)
 				return;
@@ -171,10 +218,10 @@ namespace CustomFS
 			if (isDir == true)
             {
 				byte[] folderContentsHash = hashFolderContents(directoryContents, hashingAlgorithm);
-				CryptoUtilities.signVerify(ref folderContentsSignature, true, folderContentsHash, keyPair.Private, hashingAlgorithm);
+				CryptoUtilities.signVerify(ref folderContentsSignature, true, folderContentsHash, key, hashingAlgorithm);
 			}
 
-			CryptoUtilities.signVerify(ref signedChecksum, true, encryptedData, keyPair.Private, hashingAlgorithm);
+			CryptoUtilities.signVerify(ref signedChecksum, true, encryptedData, key, hashingAlgorithm);
         }
 
 
@@ -183,6 +230,35 @@ namespace CustomFS
 			if (metadata != null)
 				return; // already decrypted
 
+			BinaryFormatter bf;
+			if (sharedMetadata != null)
+            {
+				// this is a shared file.Check if it can be decrypted (if it is for this user).
+
+				try
+                {
+					// the signature should be compared with the encrypted contents, but Bouncy castle throws an exception if incorrect parameters are used so signature checking seems to be redundant.
+
+					byte[] sharedSymmetricKey = CryptoUtilities.RSAOAEP(false, keyPair.Private, sharedMetadata.encryptedSymmetricKey); // decrypt the symmetric key
+					byte[] decryptedData = CryptoUtilities.encryptor(sharedMetadata.encryptionAlgorithm, encryptedData, sharedSymmetricKey, ref IV, false); // decrypt the data using the key above
+
+					// convert the decrypted data to metadata
+					bf = new BinaryFormatter();
+					using (MemoryStream ms = new MemoryStream(decryptedData))
+					{
+						metadata = (FileMetadata)bf.Deserialize(ms);
+					}
+				}
+				catch(Exception)
+                {
+					throw new Exception("This shared file is for another user.");
+                }
+
+				// does the file need to be encrypted, that is, does the signature have to be regenerated with own key?
+				encrypt(symmetricKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+
+				return;
+            }
 
 			if (CryptoUtilities.signVerify(ref signedChecksum, false, encryptedData, keyPair.Public, hashingAlgorithm) == false)
 				throw new InvalidSignature(name);
@@ -192,7 +268,7 @@ namespace CustomFS
 
 			byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
 
-			BinaryFormatter bf = new BinaryFormatter();
+			bf = new BinaryFormatter();
 			using (MemoryStream ms = new MemoryStream(metadataBytes))
 			{
 				metadata = (FileMetadata)bf.Deserialize(ms);

@@ -14,6 +14,7 @@ using System.IO;
 using Org.BouncyCastle.Crypto.Signers;
 using System;
 using Org.BouncyCastle.X509;
+using Org.BouncyCastle.Crypto.Encodings;
 
 namespace CustomFS
 {
@@ -22,8 +23,23 @@ namespace CustomFS
         public enum integrityHashAlgorithm { SHA2_256, SHA2_512, SHA3_256, BLAKE2b_512 }
         public enum encryptionAlgorithms { AES, ChaCha, ThreeFish };
 
+        public static readonly int defaultSymmetricKeySize = 32; // 256 bits
+
         private static SecureRandom random = new SecureRandom();
 
+        /// <summary>
+        /// Encrypt/decrypt data using RSA OAEP.Will throw an exception if incorrect key is used or if given digest algorithm doesn't match in decryption mode.The default digest is used (SHA1).
+        /// </summary>
+        /// <param name="encrypt">True for encryption, false for decryption.</param>
+        public static byte[] RSAOAEP(bool encrypt, AsymmetricKeyParameter key, byte[] dataToEncrypt)
+        {
+            var encrypter = new OaepEncoding(new RsaEngine());
+            encrypter.Init(encrypt, key);
+
+            byte[] processedData = encrypter.ProcessBlock(dataToEncrypt, 0, dataToEncrypt.Length);
+
+            return processedData;
+        }
         public static int getIVlength(encryptionAlgorithms algorithm)
         {
             switch(algorithm)
@@ -38,6 +54,7 @@ namespace CustomFS
             }
         }
 
+        
         /// <summary>
         /// Given data will be hashed using the given hashing algorithm, and signed with PSS algorithm using the given key pair.
         /// </summary>
