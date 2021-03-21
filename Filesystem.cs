@@ -123,7 +123,7 @@ namespace CustomFS
             if (toRemove == null)
                 throw new Exception("Requested file doesn't exist!");
 
-            if (toRemove.name.Equals(uploadFolderName) || toRemove.name.Equals(sharedFolderName))
+            if (toRemove.name.Equals(rootName) || toRemove.name.Equals(uploadFolderName) || toRemove.name.Equals(sharedFolderName))
                 throw new Exception("Cannot remove the selected folder!");
 
             if (toRemove.Equals(workingDirectory))
