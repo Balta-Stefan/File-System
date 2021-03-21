@@ -114,7 +114,7 @@ namespace CustomFS
                         Console.Write("\b \b");
                     }
                 }
-                else if (((int)key.Key) >= 32 && ((int)key.Key <= 126))
+                else if (((int)key.KeyChar) >= 32 && ((int)key.KeyChar <= 126))
                 {
                     // Append the character to the password.
                     temporaryPassword[passwordLength++] = (byte)key.KeyChar;
@@ -681,7 +681,6 @@ namespace CustomFS
             {
                 key = Console.ReadKey(true);
                 // Ignore any key out of alphanumeric range.
-
                 if (key.Key == ConsoleKey.Backspace) // backspace
                 {
                     if (limit > 0)
@@ -694,7 +693,7 @@ namespace CustomFS
 
                     }
                 }
-                else if (key.Key == ConsoleKey.Enter || ((int)key.Key) >= 32 && ((int)key.Key <= 126))
+                else if (key.Key == ConsoleKey.Enter || ((int)key.KeyChar) >= 32 && ((int)key.KeyChar <= 126))
                 {
                     /*if (key.Key == ConsoleKey.Enter)
                         textArray[limit++] = '\n';
@@ -787,16 +786,14 @@ namespace CustomFS
                 return;
             }
 
-            // convert file to MemoryStream
-            using (MemoryStream fileStream = loadFile(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName))
-            {
-                wantedFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
-                filesystem.setFileData(wantedFile, fileStream.ToArray());
-                //wantedFile.setData(fileStream.ToArray());
-                //requireEncryption.Add(wantedFile);
-                //filesystem.checkEncryptionUtility(wantedFile);
-                System.IO.File.Delete(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
-            }
+          
+            wantedFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            filesystem.setFileData(wantedFile, Encoding.UTF8.GetBytes(str));
+            //wantedFile.setData(fileStream.ToArray());
+            //requireEncryption.Add(wantedFile);
+            //filesystem.checkEncryptionUtility(wantedFile);
+            System.IO.File.Delete(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
+            
         }
        
         private void move(string arg)
@@ -884,6 +881,15 @@ namespace CustomFS
             }
         }
 
+        private void downloadFile(string filePath)
+        {
+            try
+            {
+                filesystem.downloadFile(filePath);
+            }
+            catch(Exception e) { Console.WriteLine(e.Message); }
+        }
+
         private void displayCurrentPath()
         {
             Console.WriteLine(filesystem.getCurrentPath());
@@ -941,6 +947,9 @@ namespace CustomFS
                         break;
                     case "share":
                         shareFile(command.Substring(6));
+                        break;
+                    case "download":
+                        downloadFile(command.Substring(9));
                         break;
 
                     default:
@@ -1011,17 +1020,22 @@ namespace CustomFS
                 }
                 else if (command.Equals("help"))
                 {
-                    Console.WriteLine("open file_name - open a file with the default program");
-                    Console.WriteLine("pwd - display current path");
-                    Console.WriteLine("mkdir path - create folder");
-                    Console.WriteLine("mv source_path destination_path - move files/folders");
-                    Console.WriteLine("maketext - create a txt file");
-                    Console.WriteLine("edit txt_file_path - edit a txt file");
-                    Console.WriteLine("rm path - remove a file/folder at specified path");
-                    Console.WriteLine("cd path - change working directory to specified path");
-                    Console.WriteLine("cls - clear screen");
-                    Console.WriteLine("ls - display contents of the working directory");
-                    Console.WriteLine("upload file_name - upload file specified by file_name located in upload folder");
+                    Console.WriteLine("+===============================================================================================================+");
+                    Console.WriteLine("|open file_name - open a file with the default program                                                          |");
+                    Console.WriteLine("|pwd - display current path                                                                                     |");
+                    Console.WriteLine("|mkdir path - create folder                                                                                     |");
+                    Console.WriteLine("|mv source_path destination_path - move files/folders                                                           |");
+                    Console.WriteLine("|maketext - create a txt file                                                                                   |");
+                    Console.WriteLine("|edit txt_file_path - edit a txt file                                                                           |");
+                    Console.WriteLine("|rm path - remove a file/folder at specified path                                                               |");
+                    Console.WriteLine("|cd path - change working directory to specified path                                                           |");
+                    Console.WriteLine("|cls - clear screen                                                                                             |");
+                    Console.WriteLine("|ls - display contents of the working directory                                                                 |");
+                    Console.WriteLine("|upload file_name - upload file specified by file_name located in upload folder.Directories cannot be uploaded. |");
+                    Console.WriteLine("|download file_path - download the specified file to the download directory.                                    |");
+                    Console.WriteLine("|                                                                                                               |");
+                    Console.WriteLine("|In order to share a file, move it to the shared directory.                                                     |");
+                    Console.WriteLine("+===============================================================================================================+");
                 }
                 else
                     obj.parseCommand(command);

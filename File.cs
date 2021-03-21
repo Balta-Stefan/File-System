@@ -175,7 +175,7 @@ namespace CustomFS
         {
 			if (metadata == null)
 				throw new FileEncrypted();
-			metadata.data = newData;
+			metadata.data = (byte[])newData.Clone();
         }
 		public string getAbsolutePath()
         {
