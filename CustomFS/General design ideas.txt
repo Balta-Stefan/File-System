@@ -1,0 +1,9 @@
+Registration:
+	-the user sends his salt that will be used in key derivation of his symmetric key.This will be encrypted with his own private key prior to sending to the server.
+
+Login:
+	-server will send the user's salt used in key derivation and the algorithms he has chosen.
+
+Optimising file editing:
+	-instead of storing the entire file system in a single file, and thus reuploading it in its entirety, whenever any change is made, store each file separately
+	-leave this optimization for later, no time now.
