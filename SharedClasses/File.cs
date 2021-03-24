@@ -90,6 +90,7 @@ namespace SharedClasses
 		public string name { get; private set; }
 		public bool isDir { get; }
 
+
 		public File parentDir;
 		private BTree directoryContents { get; } //used only for directories
 
@@ -200,7 +201,7 @@ namespace SharedClasses
 		}*/
 
 		/// <summary>
-		/// Encrypt the file or folder.
+		/// Encrypt the file or folder.When encrypting the file with own key, use Private key.
 		/// </summary>
 		/// <param name="encryptionKey">Key used for symmetric encryption.</param>
 		/// <param name="IVlength">Length of IV in bytes.</param>
@@ -211,10 +212,11 @@ namespace SharedClasses
 				return;
 			requiresEncryption = false;
 			// convert metadata into a byte array
+			
 			byte[] metadataBytes = null;
 			serializeMetadata(ref metadataBytes);
-
 			encryptedData = CryptoUtilities.encryptor(encryptionAlgorithm, metadataBytes, symmetricKey, ref IV, true);
+			
 
 			if (isDir == true)
 			{
@@ -229,7 +231,7 @@ namespace SharedClasses
 		public void decrypt(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
 		{
 			if (metadata != null)
-				return; // already decrypted
+				return; 
 
 			BinaryFormatter bf;
 			if (sharedMetadata != null)
@@ -268,6 +270,8 @@ namespace SharedClasses
 			//signedChecksum = null;
 
 			byte[] metadataBytes = CryptoUtilities.encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
+			if (metadataBytes == null)
+				throw new Exception("Decryption failure.");
 
 			bf = new BinaryFormatter();
 			using (MemoryStream ms = new MemoryStream(metadataBytes))
@@ -345,6 +349,19 @@ namespace SharedClasses
 		}
 
 		/// <summary>
+		/// Used to get around the problems caused by the shared directory.
+		/// </summary>
+		public File(File parentDir, File file, string name, bool isDir, DateTime creationTime)
+        {
+			metadata = new FileMetadata(name, isDir, creationTime, parentDir);
+			this.name = name;
+			this.isDir = isDir;
+			this.parentDir = parentDir;
+
+			directoryContents = file.directoryContents;
+        }
+
+		/// <summary>
 		/// parentDir must be decrypted!.
 		/// </summary>
 		/// <param name="parentDir">Must be decrypted before calling this method.</param>
@@ -406,6 +423,33 @@ namespace SharedClasses
 			char fileType = (isDir == true) ? 'd' : 'f';
 			return "(" + fileType + ") " + name;
 		}
+
+		public static SharedClasses.File deserializeFile(byte[] file)
+		{
+			BinaryFormatter bf = new BinaryFormatter();
+			using (MemoryStream ms = new MemoryStream(file))
+			{
+				return (SharedClasses.File)bf.Deserialize(ms);
+			}
+		}
+
+		public static byte[] serializeFile(SharedClasses.File file)
+        {
+			BinaryFormatter bf = new BinaryFormatter();
+			using (MemoryStream ms = new MemoryStream())
+			{
+				bf.Serialize(ms, file);
+				ms.Position = 0;
+				return ms.ToArray();
+			}
+		}
+
+		public bool isEncrypted()
+        {
+			if (metadata == null)
+				return true;
+			return false;
+        }
 
 		/*public FileMetadata getMetadata(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {

@@ -25,6 +25,7 @@ namespace Server
         /// </summary>
         private static readonly string userDatabaseFilename = "Database.bin";
         private static readonly string serialNumberDatabaseFilename = "Serial number database.bin";
+        private static readonly string sharedDirectoryFilename = "Shared directory.bin";
 
         //static readonly string CAfilename = "CAcert.pem";
         static readonly int cookieSize = 16; // 128 bits long
@@ -40,15 +41,19 @@ namespace Server
         static readonly string registration_successful = "Registration successful.";
         static readonly string user_exists = "Username already exists.";
         static readonly string username_doesnt_exist = "Such username doesn't exist.";
+        static readonly string login_successful = "Login successful.";
         static readonly string login_error = "Login error.";
         static readonly string incorrect_credentials = "Incorrect credentials.";
-        static readonly string login_successful = "Login successful.";
         static readonly string invalid_certificate = "Invalid certificate.";
         static readonly string certificate_revoked = "Certifikate has been revoked.";
         static readonly string certificate_not_supplied = "Certificate not supplied.";
-
+        static readonly string logout_error = "User not logged in.";
+        static readonly string logout_successful = "Logout successful";
+        static readonly string uknown_message = "Unknown message";
+        static readonly string invalid_password = "Invalid password.";
 
         private readonly AsymmetricCipherKeyPair keyPair;
+        private SharedClasses.File sharedDirectory;
 
         private bool run = true;
 
@@ -60,6 +65,10 @@ namespace Server
         public Server(AsymmetricCipherKeyPair keyPair)
         {
             this.keyPair = keyPair;
+        }
+        void updateSharedDirectory(SharedClasses.File file)
+        {
+            sharedDirectory = file;
         }
 
         void receiveMessages()
@@ -133,63 +142,83 @@ namespace Server
             BinaryFormatter bf = new BinaryFormatter();
             using(MemoryStream ms = new MemoryStream(message))
             {
-                try
-                {
-                    Credentials creds = (Credentials)bf.Deserialize(ms);
-                    return loginRegister(creds);
-                }
-                catch(Exception)
-                {
-                    // isn't login/registration message
-                    try
-                    {
-                        LogoutData logout = (LogoutData)bf.Deserialize(ms);
-                        return userLogout(logout);
-                    }
-                    catch(Exception)
-                    {
-                        // isn't logout message
-                        return serializeObject(new SessionInfo(login_error, SessionInfo.status.FAILURE));
-                    }
-                }
+                object deserialized = bf.Deserialize(ms);
+                if(deserialized is Message == false)
+                    return serializeObject(new Message(uknown_message, keyPair.Private));
+
+                Message msg = (Message)((Message)deserialized).decrypt(keyPair.Private);
+
+                if(deserialized is SharedClasses.Message.Login)
+                    return userLogin((SharedClasses.Message.Login)msg);
+                else if(deserialized is SharedClasses.Message.Registration)
+                    return userRegistration((SharedClasses.Message.Registration)msg);
+                
+                else if (deserialized is SharedClasses.Message.LogOut)
+                    return userLogout((SharedClasses.Message.LogOut)msg);
+                else
+                    return serializeObject(new Message(uknown_message, keyPair.Private));
             }
         }
 
-        byte[] userLogout(LogoutData data)
+        byte[] userRegistration(SharedClasses.Message.Registration registrationInfo)
+        {
+            if (userDatabase.ContainsKey(registrationInfo.username) == true)
+                return serializeObject(new Message.RegistrationReply(user_exists, keyPair.Private));
+
+            // sign the certificate
+            X509Certificate clientCert = CryptoUtilities.sign_CSR(registrationInfo.decodePEMcsr(), keyPair, BigInteger.Arbitrary(serial_number_size), serverDN, DateTime.UtcNow, DateTime.UtcNow.AddDays(certificateValidDurationDays));
+            UserInformation userInfo = new UserInformation(registrationInfo.userRoot, registrationInfo.password, registrationInfo.hashAlgorithm, registrationInfo.encryptionAlgorithm, registrationInfo.keyDerivationSalt, clientCert);
+
+            // store the user into the database
+            userDatabase.Add(registrationInfo.username, userInfo);
+
+            return serializeObject(new Message.RegistrationReply(registration_successful, keyPair.Private, clientCert));
+        }
+
+
+        byte[] userLogin(SharedClasses.Message.Login loginInfo)
+        {
+            if (validateCertificate(loginInfo.decodeCertificate()) == false)
+                return serializeObject(new Message(invalid_certificate, keyPair.Private));
+
+            UserInformation userInfo;
+            if (userDatabase.TryGetValue(loginInfo.username, out userInfo) == false)
+                return serializeObject(new Message.LoginReply(username_doesnt_exist, keyPair.Private));
+
+            byte[] passwordHash = CryptoUtilities.scryptKeyDerivation(loginInfo.password, userInfo.passwordStorageSalt, UserInformation.hashSize);
+
+            if (compareByteArrays(passwordHash, userInfo.hashed_password_with_salt) == false)
+                return serializeObject(new Message.LoginReply(invalid_password, keyPair.Private));
+
+            // create the session
+            byte[] cookie = new byte[cookieSize];
+            string cookieStr;
+
+            do
+            {
+                CryptoUtilities.getRandomData(cookie);
+                cookieStr = Encoding.UTF8.GetString(cookie);
+            } while (sessions.ContainsKey(cookieStr) == true);
+
+            sessions.Add(cookieStr, loginInfo.username);
+
+            Message.LoginReply loginReply = new Message.LoginReply(cookieStr, login_successful, SharedClasses.File.serializeFile(sharedDirectory), userInfo.userRoot, userInfo.symmetricEncryptionKeyDerivationSalt, keyPair.Private, userInfo.hashingAlgorithm, userInfo.encryptionAlgorithm);
+            return serializeObject(loginReply);
+        }
+
+        byte[] userLogout(SharedClasses.Message.LogOut logoutInfo)
         {
             string username;
-            if (sessions.TryGetValue(data.cookie, out username) == false)
-                return serializeObject(new SessionInfo("error", SessionInfo.status.FAILURE));
 
-            sessions.Remove(data.cookie);
+            if (sessions.TryGetValue(logoutInfo.cookie, out username) == false)
+                return serializeObject(new SharedClasses.Message.LogOut(logout_error, keyPair.Private));
+            sessions.Remove(logoutInfo.cookie);
 
-            // change the root
-            userDatabase[username].serializedRoot = data.serializedRoot;
+            UserInformation userInfo = userDatabase[username];
+            userInfo.userRoot = logoutInfo.userRoot;
+            sharedDirectory = SharedClasses.File.deserializeFile(logoutInfo.sharedDirectory);
 
-            return serializeObject(new SessionInfo("success", SessionInfo.status.SUCCESS));
-        }
-        byte[] loginRegister(Credentials creds)
-        {
-            SessionInfo session;
-            try
-            {
-                if (creds.deserialize(keyPair.Private) == false)
-                    session = new SessionInfo(login_error, SessionInfo.status.FAILURE);
-                else
-                {
-                    if (creds.type == Credentials.messageType.LOGIN)
-                        session = userLogin(creds);
-                    else
-                        session = registerUser(creds);
-                }
-            }
-            catch(Exception)
-            {
-                session = new SessionInfo(login_error, SessionInfo.status.FAILURE);
-            }
-
-            // serialize the session
-            return serializeObject(session);
+            return serializeObject(new SharedClasses.Message.LogOut(logout_successful, keyPair.Private));
         }
 
         private bool validateCertificate(X509Certificate clientCertificate)
@@ -207,40 +236,6 @@ namespace Server
             }
             return true;
         }
-        SessionInfo userLogin(Credentials creds)
-        {
-            UserInformation userData;
-            if(userDatabase.TryGetValue(creds.username, out userData) == false)
-                return new SessionInfo(username_doesnt_exist, SessionInfo.status.FAILURE);
-
-            byte[] hashedPassword = CryptoUtilities.scryptKeyDerivation(creds.password, userData.passwordStorageSalt, UserInformation.hashSize);
-
-            if(compareByteArrays(hashedPassword, userData.hashed_password_with_salt) == false)
-                return new SessionInfo(incorrect_credentials, SessionInfo.status.FAILURE);
-
-            if (validateCertificate(creds.decodeClientCertificate()) == false)
-                return new SessionInfo(invalid_certificate, SessionInfo.status.FAILURE);
-
-            // create the session
-            byte[] cookie = new byte[cookieSize];
-            string cookieStr;
-            while (true)
-            {
-                CryptoUtilities.getRandomData(cookie);
-                cookieStr = Encoding.UTF8.GetString(cookie);
-                if (sessions.ContainsKey(cookieStr) == false)
-                    break;
-            }
-
-            sessions.Add(cookieStr, creds.username);
-
-            // find the root
-            // what happens when there is no root for the new user?
-            SessionInfo session = new SessionInfo(userData.serializedRoot, cookieStr, userData.encryptionKeyIV, login_successful, SessionInfo.status.SUCCESS, userData.hashingAlgorithm, userData.encryptionAlgorithm);
-
-            return session;
-        }
-
 
 
         private bool compareByteArrays(byte[] first, byte[] second)
@@ -262,25 +257,37 @@ namespace Server
        
         public void deserializeDatabase()
         {
-            if(System.IO.File.Exists(userDatabaseFilename) == false)
+            BinaryFormatter bf = new BinaryFormatter(); ;
+            if (System.IO.File.Exists(userDatabaseFilename) == false)
                 userDatabase = new Dictionary<string, UserInformation>();
-
-            BinaryFormatter bf = new BinaryFormatter();
-            using(FileStream fs = new FileStream(userDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+            else
             {
-                userDatabase = (Dictionary<string, UserInformation>)bf.Deserialize(fs);
+                using (FileStream fs = new FileStream(userDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+                {
+                    userDatabase = (Dictionary<string, UserInformation>)bf.Deserialize(fs);
+                }
             }
 
             if (System.IO.File.Exists(serialNumberDatabaseFilename) == false)
-            {
                 serialNumberDatabase = new Dictionary<BigInteger, UserInformation>();
-                return;
-            }
-            using (FileStream fs = new FileStream(serialNumberDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+            else
             {
-                serialNumberDatabase = (Dictionary<BigInteger, UserInformation>)bf.Deserialize(fs);
+                using (FileStream fs = new FileStream(serialNumberDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+                {
+                    serialNumberDatabase = (Dictionary<BigInteger, UserInformation>)bf.Deserialize(fs);
+                }
             }
 
+            // obtain the shared dir
+            if (System.IO.File.Exists(sharedDirectoryFilename) == false)
+                sharedDirectory = new SharedClasses.File("shared", null, true, DateTime.UtcNow);
+            else
+            {
+                using (FileStream fs = new FileStream(sharedDirectoryFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+                {
+                    sharedDirectory = (SharedClasses.File)bf.Deserialize(fs);
+                }
+            }
         }
         public void serializeDatabase()
         {
@@ -293,49 +300,27 @@ namespace Server
             {
                 bf.Serialize(fs, serialNumberDatabase);
             }
-        }
-
-        private SessionInfo registerUser(Credentials creds)
-        {
-            if (userDatabase.ContainsKey(creds.username) == true)
-                return new SessionInfo(user_exists, SessionInfo.status.FAILURE);
-
-            //UserInformation userLoginCreds = new UserInformation(creds.serializedRoot, creds.password, creds.hashingAlgorithm, creds.encryptionAlgorithm, creds.keyDerivationSalt);
-
-            Pkcs10CertificationRequest csr = creds.csr;
-            if (csr == null)
-                return new SessionInfo(certificate_not_supplied, SessionInfo.status.FAILURE);
-
-            BigInteger serialNumber;
-            do
+            using (FileStream fs = new FileStream(sharedDirectoryFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
             {
-                serialNumber = BigInteger.Arbitrary(serial_number_size);
-            } while (serialNumberDatabase.ContainsKey(serialNumber) == true);
-
-            X509Certificate clientCertificate = CryptoUtilities.sign_CSR(csr, keyPair, serialNumber, serverDN, DateTime.UtcNow, DateTime.UtcNow.AddDays(certificateValidDurationDays));
-
-            UserInformation userLoginCreds = new UserInformation(creds.serializedRoot, creds.password, creds.hashingAlgorithm, creds.encryptionAlgorithm, creds.keyDerivationSalt, clientCertificate);
-
-            serialNumberDatabase.Add(serialNumber, userLoginCreds);
-            userDatabase.Add(creds.username, userLoginCreds);
-
-            byte[] serializedClientCertificate = serializeObject(clientCertificate);
-
-            return new SessionInfo(registration_successful, SessionInfo.status.SUCCESS, serializedClientCertificate);
+                bf.Serialize(fs, sharedDirectory);
+            }
         }
+
+
         static void Main(string[] args)
         {
             // get key pair
-            AsymmetricCipherKeyPair CAkeyPair = CryptoUtilities.load_keypair_from_file("CAkey.pem");
-            AsymmetricCipherKeyPair clientKeyPair = CryptoUtilities.generate_RSA_key_pair(2048);
-            /*Server obj = new Server(keyPair);
+            //AsymmetricCipherKeyPair CAkeyPair = CryptoUtilities.load_keypair_from_file("CAkey.pem");
+            //AsymmetricCipherKeyPair clientKeyPair = CryptoUtilities.generate_RSA_key_pair(2048);
+            AsymmetricCipherKeyPair keyPair = CryptoUtilities.load_keypair_from_file("CAkey.pem");
+            Server obj = new Server(keyPair);
 
             obj.deserializeDatabase();
 
-            obj.receiveMessages();*/
+            obj.receiveMessages();
 
 
-            Pkcs10CertificationRequest req = CryptoUtilities.generateCSR(clientKeyPair, "Ime", "ETF", "RI", "RS", "BA");
+            /*Pkcs10CertificationRequest req = CryptoUtilities.generateCSR(clientKeyPair, "Ime", "ETF", "RI", "RS", "BA");
             string subjectDN = req.GetCertificationRequestInfo().Subject.ToString();
             string[] data = subjectDN.Split(',');
             string commonName = null, orgName = null, departmentName = null, stateName = null, countryName = null;
@@ -375,7 +360,7 @@ namespace Server
             }
             CryptoUtilities.dumpToPEM(cert, "clientCertificate.pem");
              
-            Console.ReadLine();
+            Console.ReadLine();*/
         }
     }
 }

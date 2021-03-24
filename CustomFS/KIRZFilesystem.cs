@@ -20,10 +20,11 @@ namespace CustomFS
         // The user will have to manually move the file from the virtual upload folder to whenever he wants (inside virtual file system).
 
         private string cookie;
-        private int port = 25000;
-        private string serverIP = "127.0.0.1";
+        private static int port = 25000;
+        private static string serverIP = "127.0.0.1";
+        private AsymmetricKeyParameter serverPublicKey;
 
-        private SessionInfo sendDataToServer(byte[] send)
+        public static object sendDataToServer(byte[] send)
         {
             byte[] receivedData = null;
 
@@ -59,8 +60,7 @@ namespace CustomFS
                 BinaryFormatter bf = new BinaryFormatter();
                 using (MemoryStream ms = new MemoryStream(receivedData))
                 {
-                    SessionInfo session = (SessionInfo)bf.Deserialize(ms);
-                    return session;
+                    return bf.Deserialize(ms);
                 }
             }
             catch (Exception)
@@ -69,25 +69,44 @@ namespace CustomFS
             }
         }
 
-        public KIRZFilesystem(Credentials creds) : base(creds) { }
-        
-        public KIRZFilesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Credentials loginCreds) : base(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, loginCreds) { }
-        
-
-        /// <summary>
-        /// Call this method to retrieve contents of the shared folder from the server.
-        /// </summary>
-        private void updateSharedFolder()
+        public static byte[] serializeObject(object obj)
         {
-
+            BinaryFormatter bf = new BinaryFormatter();
+            using(MemoryStream ms = new MemoryStream())
+            {
+                bf.Serialize(ms, obj);
+                ms.Position = 0;
+                return ms.ToArray();
+            }
         }
+
+        public KIRZFilesystem(SharedClasses.Message.Login creds, AsymmetricCipherKeyPair keyPair, AsymmetricKeyParameter serverPublicKey) : base(creds, keyPair)
+        {
+            this.serverPublicKey = serverPublicKey;
+            // shared directory makes lots of problems with the current design.It will be encrypted and then decrypted to get around these problems.
+            sharedFolder = new SharedClasses.File(root, sharedFolder, sharedFolderName, true, DateTime.UtcNow);
+            sharedFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+            sharedFolder.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+
+
+            SharedClasses.File uploadDir = root.searchDirectory(uploadFolderName);
+            if (uploadDir == null)
+            {
+                uploadDir = new SharedClasses.File(uploadFolderName, root, true, DateTime.Now);
+                root.insertNewFile(uploadDir);
+            }
+            root.insertNewFile(sharedFolder);
+            root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+            uploadFolder = uploadDir;
+        }
+        
+        //public KIRZFilesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Credentials loginCreds) : base(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, loginCreds) { }
 
         /// <summary>
         /// Called when the file system has to be properly disposed at the end of session.
         /// </summary>
         public override void closeFilesystem()
         {
-            root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
 
             foreach (SharedClasses.File f in requiresEncryption)
                 f.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
@@ -95,57 +114,50 @@ namespace CustomFS
             requiresEncryption.Clear();
 
             // serialize the file
-            byte[] serializedFilesystem;
             BinaryFormatter bf = new BinaryFormatter();
-            using(MemoryStream ms = new MemoryStream())
-            {
-                bf.Serialize(ms, root);
-                ms.Position = 0;
-                serializedFilesystem = ms.ToArray();
-            }
+            
+
+            // log the user out - to do 
+            // remove the shared directory from the file system
+            root.deleteFile(sharedFolder);
+            root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+
+
+            SharedClasses.Message.LogOut logoutInfo = new SharedClasses.Message.LogOut(serverPublicKey, SharedClasses.File.serializeFile(root), SharedClasses.File.serializeFile(sharedFolder), cookie);
+            SharedClasses.Message.LogOut logoutResponse = (SharedClasses.Message.LogOut)sendDataToServer(serializeObject(logoutInfo));
+
             Array.Clear(encryptionKey, 0, encryptionKey.Length);
 
-            SessionInfo temp = sendDataToServer(serializedFilesystem);
-            Console.WriteLine(temp.message);
+            Console.WriteLine(logoutResponse.message);
         }
 
-        public override void login(Credentials loginCreds)
+        public override void login(SharedClasses.Message.Login loginCreds)
         {
             // use sockets
-            SessionInfo session;
+            SharedClasses.Message.LoginReply reply;
             BinaryFormatter binaryFormatter = new BinaryFormatter();
             using (MemoryStream stream = new MemoryStream())
             {
                 binaryFormatter.Serialize(stream, loginCreds);
                 stream.Position = 0;
                 byte[] serializedLoginCreds = stream.ToArray(); // all the data is encrypted in the LoginCredentials ctor, nothing needs to be done manually.
-                
-                // send the data to server
-                session = sendDataToServer(serializedLoginCreds);
-                if (session == null)
-                    throw new Exception("Login unsuccessful.");
-                if (session.cookie == null || session.serializedRoot == null || session.keyDerivationSalt == null)
-                {
-                    if (session.message != null)
-                        throw new Exception(session.message);
-                    else
-                        throw new Exception("Login unsuccessful.");
-                }
-            }
-            hashingAlgorithm = session.hashingAlgorithm;
-            encryptionAlgorithm = session.encryptionAlgorithm;
-            cookie = session.cookie;
 
-            byte[] serializedRoot = session.serializedRoot;
-            byte[] keyDerivationSalt = session.keyDerivationSalt;
+                // send the data to server
+                reply = (SharedClasses.Message.LoginReply)sendDataToServer(serializedLoginCreds);
+                if (reply.cookie == null)
+                    throw new Exception(reply.message);
+            }
+            hashingAlgorithm = reply.hashAlgorithm;
+            encryptionAlgorithm = reply.encryptionAlgorithm;
+            cookie = reply.cookie;
+
+            root = SharedClasses.File.deserializeFile(reply.userRoot);
+            sharedFolder = SharedClasses.File.deserializeFile(reply.sharedDirectory);
+
+            byte[] keyDerivationSalt = reply.keyDerivationSalt;
 
             encryptionKey = CryptoUtilities.scryptKeyDerivation(loginCreds.password, keyDerivationSalt, CryptoUtilities.defaultSymmetricKeySize);
 
-            BinaryFormatter bf = new BinaryFormatter();
-            using(MemoryStream ms = new MemoryStream(serializedRoot))
-            {
-                root = (SharedClasses.File)bf.Deserialize(ms);
-            }
         }
 
 

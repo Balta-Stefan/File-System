@@ -53,8 +53,9 @@ namespace CustomFS
         /// <summary>
         /// When calling this ctor, login method is responsible for assigning hashingAlgorithm, encryptionAlgorithm and keyPair to the correct values.
         /// </summary>
-        public Filesystem(Credentials loginCreds)
+        public Filesystem(SharedClasses.Message.Login loginCreds, AsymmetricCipherKeyPair keyPair)
         {
+            this.keyPair = keyPair;
             login(loginCreds);
 
             workingDirectory = root;
@@ -65,9 +66,17 @@ namespace CustomFS
             if (Directory.Exists(downloadFolderName) == false)
                 Directory.CreateDirectory(downloadFolderName);
 
-            root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+
+            try
+            {
+                root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            }
+            catch(Exception e)
+            {
+                messageQueue.Enqueue(e.Message);
+            }
         }
-        public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Credentials loginCreds)
+        public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, SharedClasses.Message.Login loginCreds)
         {
             this.encryptionKey = (byte[])encryptionKey.Clone();
             this.hashingAlgorithm = hashingAlgorithm;
@@ -83,7 +92,14 @@ namespace CustomFS
             if (Directory.Exists(downloadFolderName) == false)
                 Directory.CreateDirectory(downloadFolderName);
 
-            root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            try
+            {
+                root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            }
+            catch(Exception e)
+            {
+                messageQueue.Enqueue(e.Message);
+            }
         }
 
         public List<SharedClasses.File> listWorkingDirectory()
@@ -161,6 +177,9 @@ namespace CustomFS
                 return false;
 
             workingDirectory = newDir;
+            if (newDir.name.Equals(sharedFolderName))
+                return true; // no need to decrypt or verify the shared directory
+
             workingDirectory.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             return true;
         }
@@ -396,6 +415,8 @@ namespace CustomFS
 
         public void setFileData(SharedClasses.File file, byte[] newData)
         {
+            if (file.isEncrypted() == true)
+                file.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             file.setData(newData);
             file.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
         }
@@ -413,7 +434,7 @@ namespace CustomFS
         /// 4)Updates the conents of the shared directory.
         /// </summary>
         /// <exception cref="Exception">When login fails.</exception>
-        public abstract void login(Credentials loginCreds);
+        public abstract void login(SharedClasses.Message.Login loginCreds);
 
     }
 }

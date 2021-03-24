@@ -17,6 +17,7 @@ using Org.BouncyCastle.X509;
 using Org.BouncyCastle.Crypto.Encodings;
 using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Math;
+using System.Runtime.Serialization.Formatters.Binary;
 
 namespace SharedClasses
 {
@@ -28,6 +29,42 @@ namespace SharedClasses
         public static readonly int defaultSymmetricKeySize = 32; // 256 bits
 
         private static SecureRandom random = new SecureRandom();
+
+        public static byte[] serialize_and_encrypt_object(object obj, ref byte[] symmetricKey, ref byte[] IV, AsymmetricKeyParameter publicKey, encryptionAlgorithms encryptionAlgorithm)
+        {
+            byte[] serializedObject;
+            byte[] encryptionKey = new byte[defaultSymmetricKeySize];
+
+
+            getRandomData(symmetricKey);
+
+            BinaryFormatter bf = new BinaryFormatter();
+            using(MemoryStream ms = new MemoryStream())
+            {
+                bf.Serialize(ms, obj);
+                ms.Position = 0;
+                serializedObject = ms.ToArray();
+            }
+
+            byte[] encryptedData = encryptor(encryptionAlgorithm, serializedObject, encryptionKey, ref IV, true);
+
+            // encrypt the symmetric key
+            symmetricKey = RSAOAEP(true, publicKey, encryptionKey);
+
+            return encryptedData;
+        }
+        
+        public static object deserialize_and_decrypt_object(byte[] encryptedData, byte[] encryptedSymmetricKey, byte[] IV, AsymmetricKeyParameter privateKey, encryptionAlgorithms encryptionAlgorithm)
+        {
+            byte[] symmetricKey = RSAOAEP(false, privateKey, encryptedSymmetricKey);
+            byte[] decryptedObject = encryptor(encryptionAlgorithm, encryptedData, symmetricKey, ref IV, false);
+
+            BinaryFormatter bf = new BinaryFormatter();
+            using(MemoryStream ms = new MemoryStream(decryptedObject))
+            {
+                return bf.Deserialize(ms);
+            }
+        }
 
         public static Pkcs10CertificationRequest generateCSR(AsymmetricCipherKeyPair keyPair, string commonName, string organizationName, string organizationUnit, string state, string country)
         {
@@ -81,6 +118,23 @@ namespace SharedClasses
             }
 
             return keyPair;
+        }
+
+        public static X509Certificate loadCertFromFile(string fileName)
+        {
+            X509Certificate cert = null;
+
+            using (StreamReader stream = System.IO.File.OpenText(fileName))
+            {
+                PemReader pemReader = new PemReader(stream);
+                try
+                {
+                    cert = (X509Certificate)pemReader.ReadObject();
+                }
+                catch (Exception) { }
+            }
+
+            return cert;
         }
 
         /// <summary>
@@ -194,7 +248,7 @@ namespace SharedClasses
             {
                 cipher.DoFinal(cipherText, outputLen);
             }
-            catch (CryptoException)
+            catch (CryptoException e)
             {
                 return null;
             }
@@ -316,7 +370,7 @@ namespace SharedClasses
 
 
 
-        public static void dumpToPEM(object toDump, string fileName)
+        public static string dumpToPEM(object toDump, string fileName)
         {
             StringBuilder CSRPem = new StringBuilder();
             PemWriter CSRPemWriter = new PemWriter(new StringWriter(CSRPem));
@@ -325,10 +379,15 @@ namespace SharedClasses
 
             string CSRtext = CSRPem.ToString();
 
-            using (StreamWriter f = new StreamWriter(fileName))
+            if (fileName != null)
             {
-                f.Write(CSRtext);
+                using (StreamWriter f = new StreamWriter(fileName))
+                {
+                    f.Write(CSRtext);
+                }
             }
+
+            return CSRtext;
         }
         public static byte[] scryptKeyDerivation(byte[] data, byte[] salt, int derivedKeyLength)
         {

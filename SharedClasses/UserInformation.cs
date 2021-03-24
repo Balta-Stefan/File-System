@@ -14,7 +14,6 @@ namespace SharedClasses
         public readonly byte[] passwordStorageSalt = new byte[16]; // arbitrarily chosen salt size
         public readonly byte[] symmetricEncryptionKeyDerivationSalt; // this is the salt used to derive the symmetric key which will be used by the user to encrypt his files.
         public readonly byte[] hashed_password_with_salt = null;
-        public readonly byte[] encryptionKeyIV; // used in key derivation
         public readonly integrityHashAlgorithm hashingAlgorithm = integrityHashAlgorithm.SHA3_256;
         public readonly encryptionAlgorithms encryptionAlgorithm = encryptionAlgorithms.AES;
         public readonly X509Certificate userCertificate;
@@ -22,10 +21,10 @@ namespace SharedClasses
         public static readonly int hashSize = 32; // 256 bits   
         public static readonly short keySize = 32; // 256 bit key size will be used for all algorithms
 
-        public byte[] serializedRoot;
-        public UserInformation(byte[] serializedRoot, byte[] password, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, byte[] symmetricEncryptionKeyDerivationSalt, X509Certificate userCertificate)
+        public byte[] userRoot;
+        public UserInformation(byte[] userRoot, byte[] password, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, byte[] symmetricEncryptionKeyDerivationSalt, X509Certificate userCertificate)
         {
-            this.serializedRoot = serializedRoot;
+            this.userRoot = userRoot;
             this.hashingAlgorithm = hashingAlgorithm;
             this.encryptionAlgorithm = encryptionAlgorithm;
             this.symmetricEncryptionKeyDerivationSalt = symmetricEncryptionKeyDerivationSalt;
@@ -34,9 +33,6 @@ namespace SharedClasses
             CryptoUtilities.getRandomData(passwordStorageSalt);
             // pass the password and salt through Scrypt key derivation function
             hashed_password_with_salt = CryptoUtilities.scryptKeyDerivation(password, passwordStorageSalt, hashSize);
-
-            encryptionKeyIV = new byte[16];
-            CryptoUtilities.getRandomData(encryptionKeyIV);
         }
 
         public override string ToString()

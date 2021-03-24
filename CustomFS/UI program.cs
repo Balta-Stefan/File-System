@@ -41,9 +41,8 @@ namespace CustomFS
         private Dictionary<string, UserInformation> database = null;
         private Dictionary<string, AsymmetricKeyParameter> usersPublicKeys = null;
         //private SessionInfo session;
-        private Credentials creds;
+        //private Credentials creds;
 
-        public byte[] encryptionKey;
         public AsymmetricCipherKeyPair keyPair;
         public integrityHashAlgorithm hashingAlgorithm;
         public encryptionAlgorithms encryptionAlgorithm;
@@ -111,122 +110,6 @@ namespace CustomFS
             return temporaryPassword;
         }
 
-        public void login_OLD()
-        {
-            Console.WriteLine("Username:");
-            username = "Marko";//Console.ReadLine();
-            password = inputPassword();
-
-            UserInformation passData;
-
-            // check the database
-            if (database.TryGetValue(username, out passData) == true)
-            {
-                byte[] passwordHash = scryptKeyDerivation(password, passData.passwordStorageSalt, passData.hashed_password_with_salt.Length);
-
-                // check if the two derived keys are equal
-                if (compareByteArrays(passwordHash, passData.hashed_password_with_salt) == false)
-                    throw new Exception("Incorrect password");
-            }
-            else
-                throw new Exception("Nonexistant user name.");
-
-            encryptionKey = scryptKeyDerivation(password, passData.encryptionKeyIV, UserInformation.keySize); // derive the key for encryption 
-
-            Array.Clear(password, 0, password.Length);
-
-            // handle the client certificate
-
-            Console.WriteLine("Input the name of the certificate in PEM format:");
-            string certFilename = "mojKlijent.pem";// Console.ReadLine();
-
-            if(certFilename.Equals(CAfilename))
-                throw new Exception("Can't use CA's own certificate!");
-            
-
-            // check if the file exists
-            if (System.IO.File.Exists(certFilename) == false)
-                throw new Exception("Given file doesn't exist.Put it into the directory where exe is located.");
-            
-            else
-            {
-                var fileStream = System.IO.File.OpenText(certFilename);
-                PemReader reader = new PemReader(fileStream);
-                try
-                {
-                    clientCertificate = (X509Certificate)reader.ReadObject();
-                }
-                catch (Exception)
-                {
-                    //Console.WriteLine("Error reading the given certificate file.");
-                    throw new Exception("Error reading the given certificate file.");
-                }
-				finally 
-				{
-					fileStream.Close();
-				}
-
-                // validate the certificate 
-
-                X509Certificate rootCert = null;
-                fileStream = System.IO.File.OpenText(CAfilename);
-                reader = new PemReader(fileStream);
-                try
-                {
-                    rootCert = (X509Certificate)reader.ReadObject();
-                    serverPublicKey = rootCert.GetPublicKey();
-                }
-                catch(Exception)
-                {
-                    //Console.WriteLine("Error reading CA certificate.");
-                    throw new Exception("Error reading CA certificate.");
-                }
-				finally 
-				{
-					fileStream.Close();
-				}
-                
-                try
-                {
-                    // WARNING: VERIFYING A CERTIFICATE BY ITS OWN PUBLIC KEY WILL STILL PASS
-                    clientCertificate.Verify(rootCert.GetPublicKey());
-                }
-                catch(InvalidKeyException)
-                {
-                    //Console.WriteLine("Given certificate not signed by certificate authority");
-                    throw new Exception("Given certificate not signed by certificate authority");
-                }
-                catch(Exception)
-                {
-                    //Console.WriteLine("Error verifying the given certificate");
-                    throw new Exception("Error verifying the given certificate");
-                }
-
-                //Console.WriteLine(certificate);
-            }
-
-            Console.WriteLine("Enter the name of the file that containts your RSA key pair: ");
-            string keypairFile = "clientKey.pem";// Console.ReadLine();
-            if (System.IO.File.Exists(keypairFile) == false)
-            {
-                throw new Exception("Given file doesn't exist.Put it into the directory where exe is located");
-            }
-            var stream = System.IO.File.OpenText(keypairFile);
-            PemReader pemReader = new PemReader(stream);
-            try
-            {
-                keyPair = (AsymmetricCipherKeyPair)pemReader.ReadObject();
-            }
-            catch (Exception)
-            {
-                stream.Close();
-                throw new Exception("Error reading the given keypair file.");
-            }
-            stream.Close();
-
-            hashingAlgorithm = passData.hashingAlgorithm;
-            encryptionAlgorithm = passData.encryptionAlgorithm;
-        }
         /// <summary>
         /// Takes an array of values and asks the user to choose one.
         /// </summary>
@@ -261,116 +144,6 @@ namespace CustomFS
                 }
             }
         }
-        public void registerUser()
-        {
-            string userName;
-            byte[] pass;
-
-            while(true)
-            {
-                Console.WriteLine("Enter username: ");
-                userName = Console.ReadLine();
-                if (database.ContainsKey(userName) == true)
-                {
-                    Console.WriteLine("Such username already exists!");
-                    Console.WriteLine("");
-                }
-                else
-                    break;
-            }
-
-            while(true)
-            {
-                byte[] firstPasswordInput = inputPassword();
-                Console.WriteLine("Reenter your password: ");
-                byte[] secondPasswordInput = inputPassword();
-
-                if (compareByteArrays(firstPasswordInput, secondPasswordInput) == false)
-                    Console.WriteLine("Given passwords don't match");
-                else
-                {
-                    pass = firstPasswordInput;
-                    break;
-                }
-            }
-
-            string[] hashEnumValues = Enum.GetNames(typeof(integrityHashAlgorithm));
-            integrityHashAlgorithm hashAlgorithm = (integrityHashAlgorithm)Enum.Parse(typeof(integrityHashAlgorithm), hashEnumValues[chooseAlgorithm(hashEnumValues)]);
-
-            string[] encryptionAlgorithmsEnumValues = Enum.GetNames(typeof(encryptionAlgorithms));
-            encryptionAlgorithms encryptionAlgorithm = (encryptionAlgorithms)Enum.Parse(typeof(encryptionAlgorithms), encryptionAlgorithmsEnumValues[chooseAlgorithm(encryptionAlgorithmsEnumValues)]);
-            
-            //HashedPassword passwordData = new HashedPassword(pass, hashAlgorithm, encryptionAlgorithm);
-         
-
-            // delete the password
-            for (int i = 0; i < pass.Length; i++)
-                pass[i] = 0;
-            pass = null;
-
-
-            // create the digital certificate
-            // The user must supply a filename that contains his private key in PEM format.
-            // in the future, add support for eliptic curve cryptography.
-
-            AsymmetricCipherKeyPair privateKey = null;
-            // obtain the key file
-            while (true)
-            {
-                Console.WriteLine("Enter the name of the file that contains RSA private key in PEM format.");
-                string privateKeyFilename = Console.ReadLine();
-
-                // check if the file exists
-                if (System.IO.File.Exists(privateKeyFilename) == false)
-                {
-                    Console.WriteLine("Given file doesn't exist.Put it into the directory where exe is located");
-                    continue;
-                }
-
-                // handle the private key
-                var fileStream = System.IO.File.OpenText(privateKeyFilename);
-                PemReader reader = new PemReader(fileStream);
-                try
-                {
-                    privateKey = (AsymmetricCipherKeyPair)reader.ReadObject();
-                }
-                catch(Exception)
-                {
-                    Console.WriteLine("Error reading the given private key.");
-                    continue;
-                }
-                fileStream.Close();
-                
-                /*if(privateKey is RsaKeyParameters == false)
-                {
-                    Console.WriteLine("Given key isn't an RSA key");
-                    continue;
-                }*/
-                // what happens if the user supplies a public RSA key, instead of the private one?
-                // to do
-                break;
-            }
-
-            //var publicKey = new RsaKeyParameters(false, ((RsaPrivateCrtKeyParameters)privateKey).Modulus, ((RsaPrivateCrtKeyParameters)privateKey).PublicExponent);
-            //AsymmetricCipherKeyPair keyPair = new AsymmetricCipherKeyPair(publicKey, privateKey);
-
-            // create the certificate request using the keys.The request will be manually signed on the back end.
-            Console.WriteLine("Enter common name: ");
-            string commonName = Console.ReadLine();
-            Console.WriteLine("Enter organization name: ");
-            string organizationName = Console.ReadLine();
-            Console.WriteLine("Enter organization unit: ");
-            string organizationUnit = Console.ReadLine();
-            Console.WriteLine("Enter state: ");
-            string state = Console.ReadLine();
-            Console.WriteLine("Enter country: ");
-            string country = Console.ReadLine();
-
-            Pkcs10CertificationRequest csr = CryptoUtilities.generateCSR(privateKey, commonName, organizationName, organizationUnit, state, country);
-            CryptoUtilities.dumpToPEM(csr, "client.csr");
-        }
-
-
 
         private bool compareByteArrays(byte[] first, byte[] second)
         {
@@ -685,7 +458,6 @@ namespace CustomFS
             }
 
           
-            wantedFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             filesystem.setFileData(wantedFile, Encoding.UTF8.GetBytes(str));
             //wantedFile.setData(fileStream.ToArray());
             //requireEncryption.Add(wantedFile);
@@ -883,8 +655,9 @@ namespace CustomFS
 
         void runProgram()
         {
-            filesystem = new KIRZFilesystem(creds);
-
+            //filesystem = new KIRZFilesystem(creds, keyPair);
+            SharedClasses.Message.Login loginInfo = new SharedClasses.Message.Login(username, password, clientCertificate, serverPublicKey);
+            filesystem = new KIRZFilesystem(loginInfo, keyPair, serverPublicKey);
 
             while (true)
             {
@@ -892,7 +665,6 @@ namespace CustomFS
                 if (command.Equals("exit"))
                 {
                     filesystem.closeFilesystem();
-                    Array.Clear(encryptionKey, 0, encryptionKey.Length);
                     return;
                 }
                 else if (command.Equals("help"))
@@ -918,17 +690,130 @@ namespace CustomFS
                     parseCommand(command);
             }
         }
+        public void register()
+        {
+            string userName;
+            byte[] pass;
+
+            Console.WriteLine("Enter username: ");
+            userName = "Marko";// Console.ReadLine();
+
+
+            while (true)
+            {
+                byte[] firstPasswordInput = inputPassword();
+                Console.WriteLine("Reenter your password: ");
+                byte[] secondPasswordInput = inputPassword();
+
+                if (compareByteArrays(firstPasswordInput, secondPasswordInput) == false)
+                    Console.WriteLine("Given passwords don't match");
+                else
+                {
+                    pass = firstPasswordInput;
+                    break;
+                }
+            }
+
+            string[] hashEnumValues = Enum.GetNames(typeof(integrityHashAlgorithm));
+            integrityHashAlgorithm hashAlgorithm = CryptoUtilities.integrityHashAlgorithm.SHA2_256;//(integrityHashAlgorithm)Enum.Parse(typeof(integrityHashAlgorithm), hashEnumValues[chooseAlgorithm(hashEnumValues)]);
+
+            string[] encryptionAlgorithmsEnumValues = Enum.GetNames(typeof(encryptionAlgorithms));
+            encryptionAlgorithms encryptionAlgorithm = CryptoUtilities.encryptionAlgorithms.AES;//(encryptionAlgorithms)Enum.Parse(typeof(encryptionAlgorithms), encryptionAlgorithmsEnumValues[chooseAlgorithm(encryptionAlgorithmsEnumValues)]);
+
+            //HashedPassword passwordData = new HashedPassword(pass, hashAlgorithm, encryptionAlgorithm);
+
+            // create the digital certificate
+            // The user must supply a filename that contains his private key in PEM format.
+            // in the future, add support for eliptic curve cryptography.
+
+            AsymmetricCipherKeyPair keyPair = null;
+            // obtain the key file
+            while (true)
+            {
+                Console.WriteLine("Enter the name of the file that contains RSA private key in PEM format.");
+                string privateKeyFilename = "clientKey.pem";// Console.ReadLine();
+
+                // check if the file exists
+                if (System.IO.File.Exists(privateKeyFilename) == false)
+                {
+                    Console.WriteLine("Given file doesn't exist.Put it into the directory where exe is located");
+                    continue;
+                }
+
+                // handle the private key
+                using (StreamReader fileStream = System.IO.File.OpenText(privateKeyFilename))
+                {
+                    PemReader reader = new PemReader(fileStream);
+                    try
+                    {
+                        keyPair = (AsymmetricCipherKeyPair)reader.ReadObject();
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine("Error reading the given private key.");
+                        continue;
+                    }
+                }
+
+
+                /*if(privateKey is RsaKeyParameters == false)
+                {
+                    Console.WriteLine("Given key isn't an RSA key");
+                    continue;
+                }*/
+                // what happens if the user supplies a public RSA key, instead of the private one?
+                // to do
+                break;
+            }
+
+            //var publicKey = new RsaKeyParameters(false, ((RsaPrivateCrtKeyParameters)privateKey).Modulus, ((RsaPrivateCrtKeyParameters)privateKey).PublicExponent);
+            //AsymmetricCipherKeyPair keyPair = new AsymmetricCipherKeyPair(publicKey, privateKey);
+
+            // create the certificate request using the keys.The request will be manually signed on the back end.
+            Console.WriteLine("Enter common name: ");
+            string commonName = "Student Marko";// Console.ReadLine();
+            Console.WriteLine("Enter organization name: ");
+            string organizationName = "ETF";// Console.ReadLine();
+            Console.WriteLine("Enter organization unit: ");
+            string organizationUnit = "RI";// Console.ReadLine();
+            Console.WriteLine("Enter state: ");
+            string state = "RS";// Console.ReadLine();
+            Console.WriteLine("Enter country: ");
+            string country = "BiH";// Console.ReadLine();
+
+            byte[] keyDerivationSalt = new byte[16];
+            CryptoUtilities.getRandomData(keyDerivationSalt);
+            Pkcs10CertificationRequest csr = CryptoUtilities.generateCSR(keyPair, commonName, organizationName, organizationUnit, state, country);
+            X509Certificate serverCertificate = CryptoUtilities.loadCertFromFile(CAfilename);
+
+            // create and encrypt the root
+            SharedClasses.File root = new SharedClasses.File(userName, null, true, DateTime.Now);
+            byte[] symmetricKey = CryptoUtilities.scryptKeyDerivation(pass, keyDerivationSalt, CryptoUtilities.defaultSymmetricKeySize);
+            root.encrypt(symmetricKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+
+            SharedClasses.Message.Registration registrationCredentials = new SharedClasses.Message.Registration(userName, pass, csr, SharedClasses.File.serializeFile(root), keyDerivationSalt, serverPublicKey, hashAlgorithm, encryptionAlgorithm);
+
+            SharedClasses.Message.RegistrationReply reply = (SharedClasses.Message.RegistrationReply)KIRZFilesystem.sendDataToServer(KIRZFilesystem.serializeObject(registrationCredentials));
+            reply.decrypt(serverPublicKey);
+
+            if (reply.encodedSignedCertificate == null)
+                throw new Exception(reply.message);
+
+            Console.WriteLine(reply.message);
+            // dump the certificate
+            CryptoUtilities.dumpToPEM(reply.decodeCertificate(), userName + ".pem");
+        }
 
         public void get_login_credentials()
         {
             Console.WriteLine("Username:");
-            username = "Marko";//Console.ReadLine();
+            username = "Marko";// Console.ReadLine();
             password = inputPassword();
 
             // handle the client certificate
 
             Console.WriteLine("Input the name of the certificate in PEM format:");
-            string certFilename = "mojKlijent.pem";// Console.ReadLine();
+            string certFilename = "Marko.pem";// Console.ReadLine();
 
             // check if the file exists
             if (System.IO.File.Exists(certFilename) == false)
@@ -986,37 +871,62 @@ namespace CustomFS
 
             //Credentials(string username, byte[] password, X509Certificate clientCertificate, AsymmetricKeyParameter serverPublicKey, messageType type, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm)
 
-            creds = new Credentials(username, password, clientCertificate, serverPublicKey, Credentials.messageType.LOGIN);
-
             //filesystem = new KIRZFilesystem()
             //session = sendLoginCredentials(creds);
           
             runProgram();
         }
 
-
-        static void register()
+        void setup()
         {
-
+            if (System.IO.File.Exists(CAfilename) == false)
+                throw new Exception("Cannot find CA certificate called " + CAfilename + ".");
+            // load CA public key 
+            using (StreamReader fileStream = System.IO.File.OpenText(CAfilename))
+            {
+                PemReader reader = new PemReader(fileStream);
+                try
+                {
+                    X509Certificate CAcert = (X509Certificate)reader.ReadObject();
+                    serverPublicKey = CAcert.GetPublicKey();
+                }
+                catch (Exception)
+                {
+                    throw new Exception("Error reading the CA certificate key.");
+                }
+            }
         }
+
         static void Main(string[] args)
         {
             Program obj = new Program();
             try
             {
-                while (true)
+                obj.setup();
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+                Console.ReadLine();
+                return;
+            }
+
+
+            while (true)
+            {
+                Console.WriteLine("1)Login");
+                Console.WriteLine("2)Register");
+                Console.WriteLine("3)Exit");
+
+                int choice = 0;
+                try
                 {
-                    Console.WriteLine("1)Login");
-                    Console.WriteLine("2)Register");
-                    Console.WriteLine("3)Exit");
+                    choice = Int32.Parse(Console.ReadLine());
+                }
+                catch (Exception) { Console.WriteLine("Incorrect input"); }
 
-                    int choice = 0;
-                    try
-                    {
-                        choice = Int32.Parse(Console.ReadLine());
-                    }
-                    catch (Exception) { Console.WriteLine("Incorrect input"); }
-
+                try
+                {
                     switch (choice)
                     {
                         case 1:
@@ -1024,7 +934,7 @@ namespace CustomFS
                             Console.WriteLine(obj.clientCertificate.ToString());
                             break;
                         case 2:
-                            register();
+                            obj.register();
                             break;
                         case 3:
                             return;
@@ -1033,13 +943,15 @@ namespace CustomFS
                             break;
                     }
                 }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e.Message);
+                }
+        
                 //runProgram();
             }
-            catch (Exception e)
-            {
-                Console.WriteLine(e.Message);
-            }
-            string temp = Console.ReadLine();
+          
+            //string temp = Console.ReadLine();
             
             /*RsaKeyPairGenerator generator = new RsaKeyPairGenerator();
             generator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
