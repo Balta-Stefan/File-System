@@ -17,14 +17,16 @@ namespace SharedClasses
         public readonly integrityHashAlgorithm hashingAlgorithm = integrityHashAlgorithm.SHA3_256;
         public readonly encryptionAlgorithms encryptionAlgorithm = encryptionAlgorithms.AES;
         private byte[] encodedCertificate;
+        public readonly string userName;
         [NonSerialized] private readonly X509Certificate userCertificate;
 
         public static readonly int hashSize = 32; // 256 bits   
         public static readonly short keySize = 32; // 256 bit key size will be used for all algorithms
 
         public byte[] userRoot;
-        public UserInformation(byte[] userRoot, byte[] password, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, byte[] symmetricEncryptionKeyDerivationSalt, X509Certificate userCertificate)
+        public UserInformation(string userName, byte[] userRoot, byte[] password, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, byte[] symmetricEncryptionKeyDerivationSalt, X509Certificate userCertificate)
         {
+            this.userName = userName;
             this.userRoot = userRoot;
             this.hashingAlgorithm = hashingAlgorithm;
             this.encryptionAlgorithm = encryptionAlgorithm;
