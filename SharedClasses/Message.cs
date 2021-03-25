@@ -57,10 +57,15 @@ namespace SharedClasses
         {
             // to do - take care: the sender must serialize the shared directory.This means that his entire file system will be pulled over.Filesystem has to make sure that parentDir reference is set to null before serialization, and reset after.
             public File fileToShare;
-            public ShareFile(File share, AsymmetricKeyParameter serverPublicKey)
+            /// <summary>
+            /// This ctor will be used by the client to send the new file, and by the server in order to return the updated shared directory to the user.
+            /// </summary>
+            /// <param name="share"></param>
+            /// <param name="asymmetricKey"></param>
+            public ShareFile(File share, AsymmetricKeyParameter asymmetricKey)
             { 
                 fileToShare = share;
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, messageEncryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, asymmetricKey, messageEncryptionAlgorithm);
             }
         }
         

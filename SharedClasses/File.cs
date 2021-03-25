@@ -92,7 +92,7 @@ namespace SharedClasses
 
 
 		public File parentDir;
-		private BTree directoryContents { get; } //used only for directories
+		private BTree directoryContents;//used only for directories
 
 		// cryptography related
 		public byte[] IV;
@@ -116,7 +116,7 @@ namespace SharedClasses
 		// that metadata is the filename and isDir flag.
 
 
-		public void shareTheFile(AsymmetricKeyParameter publicKey, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
+		public SharedClasses.File share(AsymmetricKeyParameter publicKey, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
 		{
 			// generate an IV
 			int IVlength = CryptoUtilities.getIVlength(encryptionAlgorithm);
@@ -126,10 +126,13 @@ namespace SharedClasses
 			CryptoUtilities.getRandomData(key);
 			byte[] encryptedKey = CryptoUtilities.RSAOAEP(true, publicKey, key);
 
-			sharedMetadata = new SharedFileMetadata(encryptionAlgorithm, hashingAlgorithm, encryptedKey);
+			// return a copy of the file.
+			SharedClasses.File fileCopy = new File(name, null, isDir, DateTime.UtcNow);
+			fileCopy.sharedMetadata = new SharedFileMetadata(encryptionAlgorithm, hashingAlgorithm, encryptedKey);
+			fileCopy.metadata = metadata;
+			fileCopy.encrypt(key, IVlength, publicKey, hashingAlgorithm, encryptionAlgorithm);
 
-			requiresEncryption = true;
-			encrypt(key, IVlength, publicKey, hashingAlgorithm, encryptionAlgorithm);
+			return fileCopy;
 		}
 
 		/// <summary>
@@ -138,6 +141,7 @@ namespace SharedClasses
 		/// <param name="file"></param>
 		public void insertNewFile(File file)
 		{
+			file.changeParentDir(this);
 			directoryContents.insert(file);
 			requiresEncryption = true;
 		}
@@ -186,12 +190,14 @@ namespace SharedClasses
 		}
 		public void changeParentDir(File newParent)
 		{
-			if (metadata == null)
-				throw new FileEncrypted();
+			/*if (metadata == null)
+				throw new FileEncrypted();*/
 			parentDir = newParent;
-			metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
-			metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
-
+			if (metadata != null)
+			{
+				metadata.parentAbsolutePath = parentDir.metadata.absolutePath;
+				metadata.absolutePath = parentDir.metadata.absolutePath + Path.DirectorySeparatorChar + name;
+			}
 			requiresEncryption = true;
 		}
 		/*public void changeName(string newName)
@@ -206,9 +212,9 @@ namespace SharedClasses
 		/// <param name="encryptionKey">Key used for symmetric encryption.</param>
 		/// <param name="IVlength">Length of IV in bytes.</param>
 		/// <param name="key">Key used for signing.</param>
-		public void encrypt(byte[] symmetricKey, int IVlength, AsymmetricKeyParameter key, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
+		public void encrypt(byte[] symmetricKey, int IVlength, AsymmetricKeyParameter key, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, bool doEncrypt = false)
 		{
-			if (requiresEncryption == false)
+			if (doEncrypt == false && requiresEncryption == false)
 				return;
 			requiresEncryption = false;
 			// convert metadata into a byte array
@@ -451,6 +457,11 @@ namespace SharedClasses
 			return false;
         }
 
+		public SharedClasses.File cloneFile(SharedClasses.File copy)
+        {
+			copy.directoryContents = directoryContents;
+			return copy;
+        }
 		/*public FileMetadata getMetadata(byte[] symmetricKey, AsymmetricCipherKeyPair keyPair, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm)
         {
 			if (decrypted == true)
