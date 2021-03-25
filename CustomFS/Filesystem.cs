@@ -120,6 +120,9 @@ namespace CustomFS
                 throw new Exception("File with the given name already exists.");
 
             SharedClasses.File parentDir = findParent(path);
+            if (parentDir == sharedFolder)
+                throw new Exception("Cannot make a directory in the shared directory.");
+
             string dirName = Path.GetFileName(path);
 
             if (parentDir == null)
@@ -163,10 +166,13 @@ namespace CustomFS
             if (toRemove.name.Equals(workingDirectory.name))
                 workingDirectory = toRemove.parentDir;
 
-            toRemove.parentDir.deleteFile(toRemove);
-            // encrypt the parent directory to avoid integrity warnings
-            toRemove.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
-            //requiresEncryption.Add(toRemove.parentDir);
+            // the problem occurs when toRemove doesn't have a parent.
+            if (toRemove.parentDir != null)
+            {
+                toRemove.parentDir.deleteFile(toRemove);
+                // encrypt the parent directory to avoid integrity warnings
+                toRemove.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+            }
         }
 
         public bool changeDirectory(string dirName)
@@ -278,6 +284,8 @@ namespace CustomFS
             SharedClasses.File destinationFile = findFile(destinationPath);
             if (destinationFile == null)
                 throw new Exception("Destination file doesn't exist");
+            if (destinationFile == sharedFolder)
+                throw new Exception("Cannot move files to the shared directory.");
 
             // check if such file already exists at the destination
             string fileName = Path.GetFileName(sourcePath);
@@ -287,6 +295,7 @@ namespace CustomFS
             if (destinationFile.searchDirectory(fileName) != null)
                 throw new Exception("File already exists!");
 
+            sourceFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             // sourceFile.parentDir will be decrypted by the findFile method
             sourceFile.parentDir.deleteFile(sourceFile); // remove the file from the old location
             sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm); // change the signature of the parent directory to avoid warnings of directory corruption
@@ -297,12 +306,12 @@ namespace CustomFS
 
 
             sourceFile.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm); // decrypt because changeParentDir requires the parent to be decrypted
-            sourceFile.changeParentDir(destinationFile);
+            //sourceFile.changeParentDir(destinationFile);
             sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm); // encrypt the file and sign it after moving it
 
             //sourceFile.parentDir = destinationFile;
 
-
+            
             //sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -407,12 +416,18 @@ namespace CustomFS
         /// Only files can be shared.Directories aren't allowed.
         /// </summary>
         /// <param name="file">File to be shared.Directory sharing is not allowed.</param>
-        public void shareFile(SharedClasses.File file, AsymmetricKeyParameter publicKey)
+        public SharedClasses.File shareFile(SharedClasses.File file, AsymmetricKeyParameter publicKey)
         {
+            // The problem with sharing is that serializing the file in the shared directory will also serialize the entire user's file system because of the parentDir link.This is unacceptable.
+            // This will be solved in the following way: this method will return the file with parentDir set to null.The user will then send this file to the server.
+            // after that, the server will send back the whole shared directory back.
+
             if (file.isDir == true)
                 throw new Exception("Directory sharing not allowed!");
-            file.shareTheFile(publicKey, encryptionAlgorithm, hashingAlgorithm);
-            sharedFolder.insertNewFile(file);
+            file.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
+            SharedClasses.File sharedFile = file.share(publicKey, encryptionAlgorithm, hashingAlgorithm);
+            //sharedFolder.insertNewFile(sharedFile);
+            return sharedFile;
         }
 
         public void setFileData(SharedClasses.File file, byte[] newData)

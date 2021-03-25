@@ -99,6 +99,14 @@ namespace CustomFS
             root.insertNewFile(sharedFolder);
             root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
             uploadFolder = uploadDir;
+
+
+            List<SharedClasses.File> sharedFolderContents;
+            sharedFolder.traverseDirectory(out sharedFolderContents);
+
+            foreach (SharedClasses.File f in sharedFolderContents)
+                f.parentDir = sharedFolder;
+            
         }
         
         //public KIRZFilesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Credentials loginCreds) : base(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, loginCreds) { }
@@ -175,6 +183,9 @@ namespace CustomFS
             if (workingDirectory.searchDirectory(fileName) != null)
                 throw new Exception("File already exists");
 
+            if (workingDirectory == sharedFolder)
+                throw new Exception("Cannot create files in the shared directory.");
+
             SharedClasses.File newFile = new SharedClasses.File(fileName, workingDirectory, false, DateTime.Now);
             newFile.setData(Encoding.UTF8.GetBytes(contents));
 
@@ -185,5 +196,21 @@ namespace CustomFS
             workingDirectory.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
         }
 
+        public void updateSharedDirectory(SharedClasses.File sharedDir)
+        {
+            root.deleteFile(sharedFolder);
+            //sharedFolder = sharedDir.cloneFile();
+            sharedFolder = new SharedClasses.File(sharedFolderName, root, true, DateTime.UtcNow);
+            sharedDir.cloneFile(sharedFolder);
+           
+            //sharedFolder.parentDir = root;
+
+            // encrypt the file to avoid integrity warnings
+            sharedFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm, true);
+            root.insertNewFile(sharedFolder);
+
+            // encrypt the root to avoid integrity warnings
+            root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+        }
     }
 }

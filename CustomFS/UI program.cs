@@ -242,13 +242,21 @@ namespace CustomFS
                 }
 
                 // share the file
-                filesystem.shareFile(fileForSharing, receiverPublicKey);
+                SharedClasses.File fileToSend = filesystem.shareFile(fileForSharing, receiverPublicKey);
 
                 // send the file to server
-                SharedClasses.Message.ShareFile shareMessage = new Message.ShareFile(fileForSharing, serverPublicKey);
-                Message reply = (Message)KIRZFilesystem.sendDataToServer(KIRZFilesystem.serializeObject(shareMessage));
+                SharedClasses.Message.ShareFile shareMessage = new Message.ShareFile(fileToSend, serverPublicKey);
+                Message.ShareFile reply = (Message.ShareFile)KIRZFilesystem.sendDataToServer(KIRZFilesystem.serializeObject(shareMessage));
+                reply.decrypt(serverPublicKey);
+                if(reply.fileToShare == null)
+                {
+                    Console.WriteLine("Error - couldn't obtain the shared directory from server.");
+                    return;
+                }
+                // update the shared directory on the file system
+                filesystem.updateSharedDirectory(reply.fileToShare);
 
-                Console.WriteLine(reply.message);
+                //Console.WriteLine(reply.message);
             }
             catch (Exception)
             {
@@ -535,9 +543,9 @@ namespace CustomFS
             {
                 filesystem.removeFile(path);
             }
-            catch(Exception e)
+            catch(Exception)
             {
-                Console.WriteLine(e.Message);
+                Console.WriteLine("There has been an error while trying to delete the file.");
             }
          
             foreach (string s in filesystem.getMessages())
@@ -664,12 +672,34 @@ namespace CustomFS
             }
         }
 
-
+        private void printHelp()
+        {
+            Console.WriteLine("+===============================================================================================================+");
+            Console.WriteLine("|help - display this                                                                                            |");
+            Console.WriteLine("|open file_name - open a file with the default program                                                          |");
+            Console.WriteLine("|pwd - display current path                                                                                     |");
+            Console.WriteLine("|mkdir path - create folder                                                                                     |");
+            Console.WriteLine("|mv source_path destination_path - move files/folders                                                           |");
+            Console.WriteLine("|maketext - create a txt file                                                                                   |");
+            Console.WriteLine("|edit txt_file_path - edit a txt file                                                                           |");
+            Console.WriteLine("|rm path - remove a file/folder at specified path                                                               |");
+            Console.WriteLine("|cd path - change working directory to specified path                                                           |");
+            Console.WriteLine("|cls - clear screen                                                                                             |");
+            Console.WriteLine("|ls - display contents of the working directory                                                                 |");
+            Console.WriteLine("|upload file_name - upload file specified by file_name located in upload folder.Directories cannot be uploaded. |");
+            Console.WriteLine("|download file_path - download the specified file to the download directory.                                    |");
+            Console.WriteLine("|share \"receiver\" \"file_path\" - share the selected file with the specified receiver.                        |");
+            Console.WriteLine("|                                                                                                               |");
+            Console.WriteLine("+===============================================================================================================+");
+        }
         void runProgram()
         {
             //filesystem = new KIRZFilesystem(creds, keyPair);
             SharedClasses.Message.Login loginInfo = new SharedClasses.Message.Login(username, password, clientCertificate, serverPublicKey);
             filesystem = new KIRZFilesystem(loginInfo, keyPair, serverPublicKey);
+
+            Console.Clear();
+            printHelp();
 
             while (true)
             {
@@ -680,24 +710,7 @@ namespace CustomFS
                     return;
                 }
                 else if (command.Equals("help"))
-                {
-                    Console.WriteLine("+===============================================================================================================+");
-                    Console.WriteLine("|open file_name - open a file with the default program                                                          |");
-                    Console.WriteLine("|pwd - display current path                                                                                     |");
-                    Console.WriteLine("|mkdir path - create folder                                                                                     |");
-                    Console.WriteLine("|mv source_path destination_path - move files/folders                                                           |");
-                    Console.WriteLine("|maketext - create a txt file                                                                                   |");
-                    Console.WriteLine("|edit txt_file_path - edit a txt file                                                                           |");
-                    Console.WriteLine("|rm path - remove a file/folder at specified path                                                               |");
-                    Console.WriteLine("|cd path - change working directory to specified path                                                           |");
-                    Console.WriteLine("|cls - clear screen                                                                                             |");
-                    Console.WriteLine("|ls - display contents of the working directory                                                                 |");
-                    Console.WriteLine("|upload file_name - upload file specified by file_name located in upload folder.Directories cannot be uploaded. |");
-                    Console.WriteLine("|download file_path - download the specified file to the download directory.                                    |");
-                    Console.WriteLine("|share \"receiver\" \"file_path\" - share the selected file with the specified receiver.                        |");
-                    Console.WriteLine("|                                                                                                               |");
-                    Console.WriteLine("+===============================================================================================================+");
-                }
+                    printHelp();
                 else
                     parseCommand(command);
             }
