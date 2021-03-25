@@ -205,9 +205,14 @@ namespace Server
 
         byte[] shareFile(SharedClasses.Message.ShareFile share)
         {
-            sharedDirectory.insertNewFile(share.fileToShare);
+            SharedClasses.File alreadyExists = sharedDirectory.searchDirectory(share.fileToShare.name);
+            if (alreadyExists != null)
+                sharedDirectory.deleteFile(alreadyExists);
 
-            return serializeObject(new Message("success", keyPair.Private));
+            sharedDirectory.insertNewFile(share.fileToShare);
+            return serializeObject(new Message.ShareFile(sharedDirectory, keyPair.Private));
+
+            //return serializeObject(new Message("success", keyPair.Private));
         }
 
         byte[] userLogin(SharedClasses.Message.Login loginInfo)
