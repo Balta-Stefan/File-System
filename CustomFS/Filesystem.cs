@@ -48,7 +48,8 @@ namespace CustomFS
 
         ~Filesystem()
         {
-            Array.Clear(encryptionKey, 0, encryptionKey.Length);
+            if(encryptionKey != null)
+                Array.Clear(encryptionKey, 0, encryptionKey.Length);
         }
         /// <summary>
         /// When calling this ctor, login method is responsible for assigning hashingAlgorithm, encryptionAlgorithm and keyPair to the correct values.
@@ -74,6 +75,7 @@ namespace CustomFS
             catch(Exception e)
             {
                 messageQueue.Enqueue(e.Message);
+                throw new Exception("Cannot decrypt the root directory.");
             }
         }
         public Filesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, SharedClasses.Message.Login loginCreds)
@@ -405,7 +407,7 @@ namespace CustomFS
         /// Only files can be shared.Directories aren't allowed.
         /// </summary>
         /// <param name="file">File to be shared.Directory sharing is not allowed.</param>
-        public void shareFile(SharedClasses.File file, AsymmetricKeyParameter publicKey, CryptoUtilities.encryptionAlgorithms encryptionAlgorithm, CryptoUtilities.integrityHashAlgorithm hashingAlgorithm)
+        public void shareFile(SharedClasses.File file, AsymmetricKeyParameter publicKey)
         {
             if (file.isDir == true)
                 throw new Exception("Directory sharing not allowed!");

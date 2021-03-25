@@ -16,7 +16,8 @@ namespace SharedClasses
         public readonly byte[] hashed_password_with_salt = null;
         public readonly integrityHashAlgorithm hashingAlgorithm = integrityHashAlgorithm.SHA3_256;
         public readonly encryptionAlgorithms encryptionAlgorithm = encryptionAlgorithms.AES;
-        public readonly X509Certificate userCertificate;
+        private byte[] encodedCertificate;
+        [NonSerialized] private readonly X509Certificate userCertificate;
 
         public static readonly int hashSize = 32; // 256 bits   
         public static readonly short keySize = 32; // 256 bit key size will be used for all algorithms
@@ -28,11 +29,16 @@ namespace SharedClasses
             this.hashingAlgorithm = hashingAlgorithm;
             this.encryptionAlgorithm = encryptionAlgorithm;
             this.symmetricEncryptionKeyDerivationSalt = symmetricEncryptionKeyDerivationSalt;
-            this.userCertificate = userCertificate;
+            encodedCertificate = userCertificate.GetEncoded();
             // generate a salt
             CryptoUtilities.getRandomData(passwordStorageSalt);
             // pass the password and salt through Scrypt key derivation function
             hashed_password_with_salt = CryptoUtilities.scryptKeyDerivation(password, passwordStorageSalt, hashSize);
+        }
+
+        public X509Certificate decodeCertificate()
+        {
+            return new X509CertificateParser().ReadCertificate(encodedCertificate);
         }
 
         public override string ToString()

@@ -22,7 +22,7 @@ namespace SharedClasses
         // 5)Logout
         // 6)Logout reply
 
-        CryptoUtilities.encryptionAlgorithms encryptionAlgorithm = CryptoUtilities.encryptionAlgorithms.AES;
+        public static readonly CryptoUtilities.encryptionAlgorithms messageEncryptionAlgorithm = CryptoUtilities.encryptionAlgorithms.AES;
 
         public byte[] symmetricKey;
         public byte[] IV;
@@ -40,17 +40,59 @@ namespace SharedClasses
         {
             symmetricKey = new byte[CryptoUtilities.defaultSymmetricKeySize];
             this.message = message;
-            encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, encryptionAlgorithm);
+            encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, messageEncryptionAlgorithm);
         }
+
 
         /// <summary>
         /// The client will call this with the server's public key.The server will call this with its private key.
         /// </summary>
         public object decrypt(AsymmetricKeyParameter asymmetricKey)
         {
-            return CryptoUtilities.deserialize_and_decrypt_object(encryptedData, symmetricKey, IV, asymmetricKey, encryptionAlgorithm);
+            return CryptoUtilities.deserialize_and_decrypt_object(encryptedData, symmetricKey, IV, asymmetricKey, messageEncryptionAlgorithm);
         }
+       
+        [Serializable]
+        public class ShareFile : Message
+        {
+            // to do - take care: the sender must serialize the shared directory.This means that his entire file system will be pulled over.Filesystem has to make sure that parentDir reference is set to null before serialization, and reset after.
+            public File fileToShare;
+            public ShareFile(File share, AsymmetricKeyParameter serverPublicKey)
+            { 
+                fileToShare = share;
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, messageEncryptionAlgorithm);
+            }
+        }
+        
+        [Serializable]
+        public class PublicKeyRequest : Message
+        {
+            private string PEMpublicKey;
+            public string userName;
+            /// <summary>
+            /// Client ctor
+            /// </summary>
+            public PublicKeyRequest(string userName, AsymmetricKeyParameter serverPublicKey) 
+            {
+                this.userName = userName;
 
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, messageEncryptionAlgorithm);
+            }
+            public PublicKeyRequest(AsymmetricKeyParameter serverPrivateKey, AsymmetricKeyParameter userPublicKey, string message)
+            {
+                this.message = message;
+                if(userPublicKey != null)
+                    PEMpublicKey = CryptoUtilities.dumpToPEM(userPublicKey, null);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, messageEncryptionAlgorithm);
+            }
+
+            public AsymmetricKeyParameter decodePublicKey()
+            {
+                if (PEMpublicKey == null)
+                    return null;
+                return (AsymmetricKeyParameter)(CryptoUtilities.readPem(PEMpublicKey));
+            }
+        }
         
 
         [Serializable]
@@ -66,7 +108,7 @@ namespace SharedClasses
                 encodedClientCertificate = clientCertificate.GetEncoded();
 
                 // encrypt the contents with the server's public key
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, encryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, messageEncryptionAlgorithm);
             }
             public X509Certificate decodeCertificate()
             {
@@ -134,7 +176,7 @@ namespace SharedClasses
                 // dump csr to PEM string
                 PEMcsr = CryptoUtilities.dumpToPEM(csr, null);
 
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, encryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, messageEncryptionAlgorithm);
             }
 
             public Pkcs10CertificationRequest decodePEMcsr()
@@ -159,7 +201,7 @@ namespace SharedClasses
             {
                 this.message = message;
 
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, encryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, messageEncryptionAlgorithm);
             }
             /// <summary>
             /// Use for successful registration;
@@ -169,7 +211,7 @@ namespace SharedClasses
                 this.message = message;
                 encodedSignedCertificate = clientCertificate.GetEncoded();
 
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, encryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, messageEncryptionAlgorithm);
             }
 
             public X509Certificate decodeCertificate()
@@ -191,7 +233,7 @@ namespace SharedClasses
             public LogOut(string message, AsymmetricKeyParameter serverPrivateKey)
             {
                 this.message = message;
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, encryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPrivateKey, messageEncryptionAlgorithm);
             }
             /// <summary>
             /// Use to log out (user).
@@ -202,7 +244,7 @@ namespace SharedClasses
                 this.sharedDirectory = sharedDirectory;
                 this.cookie = cookie;
 
-                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, encryptionAlgorithm);
+                encryptedData = CryptoUtilities.serialize_and_encrypt_object(this, ref symmetricKey, ref IV, serverPublicKey, messageEncryptionAlgorithm);
             }
         }
     }

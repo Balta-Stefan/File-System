@@ -38,14 +38,12 @@ namespace CustomFS
 
 
 
-        private Dictionary<string, UserInformation> database = null;
-        private Dictionary<string, AsymmetricKeyParameter> usersPublicKeys = null;
         //private SessionInfo session;
         //private Credentials creds;
 
         public AsymmetricCipherKeyPair keyPair;
-        public integrityHashAlgorithm hashingAlgorithm;
-        public encryptionAlgorithms encryptionAlgorithm;
+        //public integrityHashAlgorithm hashingAlgorithm;
+        //public encryptionAlgorithms encryptionAlgorithm;
         public KIRZFilesystem filesystem;
         public AsymmetricKeyParameter serverPublicKey;
         //public File workingDirectory;
@@ -177,9 +175,12 @@ namespace CustomFS
 
         public AsymmetricKeyParameter getUserPublicKey(string userName)
         {
-            AsymmetricKeyParameter wantedKey = null;
-            usersPublicKeys.TryGetValue(userName, out wantedKey);
-            return wantedKey;
+            // get the public key from the server
+            SharedClasses.Message.PublicKeyRequest request = new SharedClasses.Message.PublicKeyRequest(userName, serverPublicKey);
+            SharedClasses.Message.PublicKeyRequest response = (SharedClasses.Message.PublicKeyRequest)KIRZFilesystem.sendDataToServer(KIRZFilesystem.serializeObject(request));
+            response.decrypt(serverPublicKey);
+
+            return response.decodePublicKey();
         }
         
         /// <param name="toShareArgs">Format: "username of the receiver" "file path"</param>
@@ -209,17 +210,25 @@ namespace CustomFS
                 receiver = toShareArgs.Substring(0, secondQuote);
                 filePath = toShareArgs.Substring(secondQuote + 3);
                 filePath = filePath.Substring(0, filePath.Length - 1); // remove the last quote
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Incorrect arguments.Specify them as \"receiver\" \"file path\"");
+                return;
+            }
 
+            try
+            {
                 receiverPublicKey = getUserPublicKey(receiver);
-                if(receiverPublicKey == null)
+                if (receiverPublicKey == null)
                 {
                     Console.WriteLine("Wanted user doesn't exist");
                     return;
                 }
             }
-            catch (Exception)
+            catch(Exception e)
             {
-                Console.WriteLine("Incorrect arguments.Specify them as \"receiver\" \"file path\"");
+                Console.WriteLine("Error obtaining the user's public key.");
                 return;
             }
 
@@ -233,11 +242,17 @@ namespace CustomFS
                 }
 
                 // share the file
-                filesystem.shareFile(fileForSharing, receiverPublicKey, encryptionAlgorithm, hashingAlgorithm);
+                filesystem.shareFile(fileForSharing, receiverPublicKey);
+
+                // send the file to server
+                SharedClasses.Message.ShareFile shareMessage = new Message.ShareFile(fileForSharing, serverPublicKey);
+                Message reply = (Message)KIRZFilesystem.sendDataToServer(KIRZFilesystem.serializeObject(shareMessage));
+
+                Console.WriteLine(reply.message);
             }
-            catch (Exception e)
+            catch (Exception)
             {
-                Console.WriteLine(e.Message);
+                Console.WriteLine("Cannot share the specified file");
             }
         }
         private void openFile(string fileName)
@@ -641,13 +656,10 @@ namespace CustomFS
                 {
                     BinaryFormatter bf = new BinaryFormatter();
                     return bf.Deserialize(stream);
-                    //Filesystem tempFS = (Filesystem)bf.Deserialize(stream);
-                    //filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, tempFS);
                 }
             }
             catch(Exception)
             {
-                //filesystem = new Filesystem(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair); // nothing to deserialize
                 return null;
             }
         }
@@ -682,8 +694,8 @@ namespace CustomFS
                     Console.WriteLine("|ls - display contents of the working directory                                                                 |");
                     Console.WriteLine("|upload file_name - upload file specified by file_name located in upload folder.Directories cannot be uploaded. |");
                     Console.WriteLine("|download file_path - download the specified file to the download directory.                                    |");
+                    Console.WriteLine("|share \"receiver\" \"file_path\" - share the selected file with the specified receiver.                        |");
                     Console.WriteLine("|                                                                                                               |");
-                    Console.WriteLine("|In order to share a file, move it to the shared directory.                                                     |");
                     Console.WriteLine("+===============================================================================================================+");
                 }
                 else
@@ -696,7 +708,7 @@ namespace CustomFS
             byte[] pass;
 
             Console.WriteLine("Enter username: ");
-            userName = "Marko";// Console.ReadLine();
+            userName = Console.ReadLine();
 
 
             while (true)
@@ -715,10 +727,10 @@ namespace CustomFS
             }
 
             string[] hashEnumValues = Enum.GetNames(typeof(integrityHashAlgorithm));
-            integrityHashAlgorithm hashAlgorithm = CryptoUtilities.integrityHashAlgorithm.SHA2_256;//(integrityHashAlgorithm)Enum.Parse(typeof(integrityHashAlgorithm), hashEnumValues[chooseAlgorithm(hashEnumValues)]);
+            integrityHashAlgorithm hashAlgorithm = (integrityHashAlgorithm)Enum.Parse(typeof(integrityHashAlgorithm), hashEnumValues[chooseAlgorithm(hashEnumValues)]);
 
             string[] encryptionAlgorithmsEnumValues = Enum.GetNames(typeof(encryptionAlgorithms));
-            encryptionAlgorithms encryptionAlgorithm = CryptoUtilities.encryptionAlgorithms.AES;//(encryptionAlgorithms)Enum.Parse(typeof(encryptionAlgorithms), encryptionAlgorithmsEnumValues[chooseAlgorithm(encryptionAlgorithmsEnumValues)]);
+            encryptionAlgorithms encryptionAlgorithm = (encryptionAlgorithms)Enum.Parse(typeof(encryptionAlgorithms), encryptionAlgorithmsEnumValues[chooseAlgorithm(encryptionAlgorithmsEnumValues)]);
 
             //HashedPassword passwordData = new HashedPassword(pass, hashAlgorithm, encryptionAlgorithm);
 
@@ -731,7 +743,7 @@ namespace CustomFS
             while (true)
             {
                 Console.WriteLine("Enter the name of the file that contains RSA private key in PEM format.");
-                string privateKeyFilename = "clientKey.pem";// Console.ReadLine();
+                string privateKeyFilename = Console.ReadLine();
 
                 // check if the file exists
                 if (System.IO.File.Exists(privateKeyFilename) == false)
@@ -771,7 +783,7 @@ namespace CustomFS
 
             // create the certificate request using the keys.The request will be manually signed on the back end.
             Console.WriteLine("Enter common name: ");
-            string commonName = "Student Marko";// Console.ReadLine();
+            string commonName = Console.ReadLine();
             Console.WriteLine("Enter organization name: ");
             string organizationName = "ETF";// Console.ReadLine();
             Console.WriteLine("Enter organization unit: ");
@@ -789,7 +801,7 @@ namespace CustomFS
             // create and encrypt the root
             SharedClasses.File root = new SharedClasses.File(userName, null, true, DateTime.Now);
             byte[] symmetricKey = CryptoUtilities.scryptKeyDerivation(pass, keyDerivationSalt, CryptoUtilities.defaultSymmetricKeySize);
-            root.encrypt(symmetricKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+            root.encrypt(symmetricKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashAlgorithm, encryptionAlgorithm);
 
             SharedClasses.Message.Registration registrationCredentials = new SharedClasses.Message.Registration(userName, pass, csr, SharedClasses.File.serializeFile(root), keyDerivationSalt, serverPublicKey, hashAlgorithm, encryptionAlgorithm);
 
@@ -807,13 +819,13 @@ namespace CustomFS
         public void get_login_credentials()
         {
             Console.WriteLine("Username:");
-            username = "Marko";// Console.ReadLine();
+            username = Console.ReadLine();
             password = inputPassword();
 
             // handle the client certificate
 
             Console.WriteLine("Input the name of the certificate in PEM format:");
-            string certFilename = "Marko.pem";// Console.ReadLine();
+            string certFilename = Console.ReadLine();
 
             // check if the file exists
             if (System.IO.File.Exists(certFilename) == false)
@@ -860,7 +872,7 @@ namespace CustomFS
             }
 
             Console.WriteLine("Enter the name of the file that containts your RSA key pair: ");
-            string keypairFile = "clientKey.pem";// Console.ReadLine();
+            string keypairFile = Console.ReadLine();
             if (System.IO.File.Exists(keypairFile) == false)
             {
                 Console.WriteLine("Given file doesn't exist.Put it into the directory where exe is located");
@@ -868,11 +880,6 @@ namespace CustomFS
             }
 
             keyPair = CryptoUtilities.load_keypair_from_file(keypairFile);
-
-            //Credentials(string username, byte[] password, X509Certificate clientCertificate, AsymmetricKeyParameter serverPublicKey, messageType type, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm)
-
-            //filesystem = new KIRZFilesystem()
-            //session = sendLoginCredentials(creds);
           
             runProgram();
         }

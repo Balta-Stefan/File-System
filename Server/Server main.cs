@@ -13,6 +13,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
+using System.Threading;
 
 namespace Server
 {
@@ -45,7 +46,7 @@ namespace Server
         static readonly string login_error = "Login error.";
         static readonly string incorrect_credentials = "Incorrect credentials.";
         static readonly string invalid_certificate = "Invalid certificate.";
-        static readonly string certificate_revoked = "Certifikate has been revoked.";
+        static readonly string certificate_revoked = "Certificate has been revoked.";
         static readonly string certificate_not_supplied = "Certificate not supplied.";
         static readonly string logout_error = "User not logged in.";
         static readonly string logout_successful = "Logout successful";
@@ -55,7 +56,8 @@ namespace Server
         private readonly AsymmetricCipherKeyPair keyPair;
         private SharedClasses.File sharedDirectory;
 
-        private bool run = true;
+        public bool run = true;
+
 
         private Dictionary<string, UserInformation> userDatabase = null;
         private Dictionary<string, string> sessions = new Dictionary<string, string>(); // key = cookie, value = user name
@@ -66,10 +68,7 @@ namespace Server
         {
             this.keyPair = keyPair;
         }
-        void updateSharedDirectory(SharedClasses.File file)
-        {
-            sharedDirectory = file;
-        }
+
 
         void receiveMessages()
         {
@@ -96,6 +95,7 @@ namespace Server
 
                         // obtain the message length represented by 2 bytes
                         clientSocket.Receive(messageLengthBytes);
+
                         int messageLength = messageLengthBytes[0] | (messageLengthBytes[1] << 8);
 
                         // allocate a buffer for the incoming data
@@ -113,6 +113,10 @@ namespace Server
 
                         clientSocket.Shutdown(SocketShutdown.Both);
                         clientSocket.Close();
+                    }
+                    catch(ThreadAbortException)
+                    {
+                        return;
                     }
                     catch (Exception e)
                     {
@@ -137,6 +141,15 @@ namespace Server
                 return ms.ToArray();
             }
         }
+
+        private object deserializeObject(byte[] obj)
+        {
+            BinaryFormatter bf = new BinaryFormatter();
+            using (MemoryStream ms = new MemoryStream(obj))
+            {
+                return bf.Deserialize(ms);
+            }
+        }
         byte[] determineMessageType(byte[] message)
         {
             BinaryFormatter bf = new BinaryFormatter();
@@ -148,16 +161,31 @@ namespace Server
 
                 Message msg = (Message)((Message)deserialized).decrypt(keyPair.Private);
 
-                if(deserialized is SharedClasses.Message.Login)
+                if (deserialized is SharedClasses.Message.Login)
                     return userLogin((SharedClasses.Message.Login)msg);
-                else if(deserialized is SharedClasses.Message.Registration)
+                else if (deserialized is SharedClasses.Message.Registration)
                     return userRegistration((SharedClasses.Message.Registration)msg);
-                
+
                 else if (deserialized is SharedClasses.Message.LogOut)
                     return userLogout((SharedClasses.Message.LogOut)msg);
+                else if (deserialized is SharedClasses.Message.PublicKeyRequest)
+                    return getPublicKey((SharedClasses.Message.PublicKeyRequest)msg);
+                else if (deserialized is SharedClasses.Message.ShareFile)
+                    return shareFile((SharedClasses.Message.ShareFile)msg);
                 else
                     return serializeObject(new Message(uknown_message, keyPair.Private));
             }
+        }
+
+        byte[] getPublicKey(SharedClasses.Message.PublicKeyRequest request)
+        {
+            UserInformation userInfo;
+            if (userDatabase.TryGetValue(request.userName, out userInfo) == false)
+                return serializeObject(new SharedClasses.Message.PublicKeyRequest(keyPair.Private, null, username_doesnt_exist));
+
+            AsymmetricKeyParameter userKey = userInfo.decodeCertificate().GetPublicKey();
+
+            return serializeObject(new SharedClasses.Message.PublicKeyRequest(keyPair.Private, userKey, "Success"));
         }
 
         byte[] userRegistration(SharedClasses.Message.Registration registrationInfo)
@@ -175,15 +203,21 @@ namespace Server
             return serializeObject(new Message.RegistrationReply(registration_successful, keyPair.Private, clientCert));
         }
 
+        byte[] shareFile(SharedClasses.Message.ShareFile share)
+        {
+            sharedDirectory.insertNewFile(share.fileToShare);
+
+            return serializeObject(new Message("success", keyPair.Private));
+        }
 
         byte[] userLogin(SharedClasses.Message.Login loginInfo)
         {
-            if (validateCertificate(loginInfo.decodeCertificate()) == false)
-                return serializeObject(new Message(invalid_certificate, keyPair.Private));
-
             UserInformation userInfo;
             if (userDatabase.TryGetValue(loginInfo.username, out userInfo) == false)
                 return serializeObject(new Message.LoginReply(username_doesnt_exist, keyPair.Private));
+
+            if (validateCertificate(loginInfo.decodeCertificate(), userInfo) == false)
+                return serializeObject(new Message.LoginReply(invalid_certificate, keyPair.Private));
 
             byte[] passwordHash = CryptoUtilities.scryptKeyDerivation(loginInfo.password, userInfo.passwordStorageSalt, UserInformation.hashSize);
 
@@ -221,16 +255,20 @@ namespace Server
             return serializeObject(new SharedClasses.Message.LogOut(logout_successful, keyPair.Private));
         }
 
-        private bool validateCertificate(X509Certificate clientCertificate)
+        private bool validateCertificate(X509Certificate clientCertificate, UserInformation userInfo)
         {
             try
             {
                 clientCertificate.Verify(keyPair.Public);
+                // check if the given certificate belongs to the given user
+                if (clientCertificate.Equals(userInfo.decodeCertificate()) == false)
+                    return false;
                 // check common name - to do
-               
+
                 // check CRL list - to do
+
             }
-            catch(Exception)
+            catch (Exception)
             {
                 return false;
             }
@@ -257,14 +295,14 @@ namespace Server
        
         public void deserializeDatabase()
         {
-            BinaryFormatter bf = new BinaryFormatter(); ;
+            BinaryFormatter bf = new BinaryFormatter();
             if (System.IO.File.Exists(userDatabaseFilename) == false)
                 userDatabase = new Dictionary<string, UserInformation>();
             else
             {
                 using (FileStream fs = new FileStream(userDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
                 {
-                    userDatabase = (Dictionary<string, UserInformation>)bf.Deserialize(fs);
+                    userDatabase = (Dictionary <string, UserInformation>)(bf.Deserialize(fs));
                 }
             }
 
@@ -291,21 +329,27 @@ namespace Server
         }
         public void serializeDatabase()
         {
+          
             BinaryFormatter bf = new BinaryFormatter();
-            using (FileStream fs = new FileStream(userDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+            using (FileStream fs = new FileStream(userDatabaseFilename, System.IO.FileMode.Create, System.IO.FileAccess.Write, FileShare.Read))
             {
                 bf.Serialize(fs, userDatabase);
             }
-            using(FileStream fs = new FileStream(serialNumberDatabaseFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+            using (FileStream fs = new FileStream(serialNumberDatabaseFilename, System.IO.FileMode.Create, System.IO.FileAccess.Write, FileShare.Read))
             {
                 bf.Serialize(fs, serialNumberDatabase);
             }
-            using (FileStream fs = new FileStream(sharedDirectoryFilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+            using (FileStream fs = new FileStream(sharedDirectoryFilename, System.IO.FileMode.Create, System.IO.FileAccess.Write, FileShare.Read))
             {
                 bf.Serialize(fs, sharedDirectory);
             }
+            
         }
-
+    
+        void stop()
+        {
+            run = false;
+        }
 
         static void Main(string[] args)
         {
@@ -317,8 +361,40 @@ namespace Server
 
             obj.deserializeDatabase();
 
-            obj.receiveMessages();
+            Thread thread = new Thread(obj.receiveMessages);
+            //obj.receiveMessages();
+            thread.Start();
 
+            bool runLoop = true;
+            while(runLoop)
+            {
+                Console.WriteLine("1)Stop");
+
+                string choice = Console.ReadLine();
+                int choiceNum = 0;
+                try
+                {
+                    choiceNum = Int32.Parse(choice);
+                }
+                catch(Exception)
+                {
+                    Console.WriteLine("Incorrect input.");
+                    continue;
+                }
+
+                switch(choiceNum)
+                {
+                    case 1:
+                        obj.stop();
+                        runLoop = false;
+                        break;
+                }
+            }
+           
+            thread.Abort();
+            obj.serializeDatabase();
+            Console.ReadLine();
+            Console.WriteLine(thread.ThreadState);
 
             /*Pkcs10CertificationRequest req = CryptoUtilities.generateCSR(clientKeyPair, "Ime", "ETF", "RI", "RS", "BA");
             string subjectDN = req.GetCertificationRequestInfo().Subject.ToString();

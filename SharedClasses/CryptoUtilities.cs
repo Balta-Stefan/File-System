@@ -30,11 +30,25 @@ namespace SharedClasses
 
         private static SecureRandom random = new SecureRandom();
 
+        public static object readPem(string PEMstructure)
+        {
+            using (StringReader strReader = new StringReader(PEMstructure))
+            {
+                PemReader reader = new PemReader(strReader);
+                try
+                {
+                    return reader.ReadObject();
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
+        }
+
         public static byte[] serialize_and_encrypt_object(object obj, ref byte[] symmetricKey, ref byte[] IV, AsymmetricKeyParameter publicKey, encryptionAlgorithms encryptionAlgorithm)
         {
             byte[] serializedObject;
-            byte[] encryptionKey = new byte[defaultSymmetricKeySize];
-
 
             getRandomData(symmetricKey);
 
@@ -46,10 +60,10 @@ namespace SharedClasses
                 serializedObject = ms.ToArray();
             }
 
-            byte[] encryptedData = encryptor(encryptionAlgorithm, serializedObject, encryptionKey, ref IV, true);
+            byte[] encryptedData = encryptor(encryptionAlgorithm, serializedObject, symmetricKey, ref IV, true);
 
             // encrypt the symmetric key
-            symmetricKey = RSAOAEP(true, publicKey, encryptionKey);
+            symmetricKey = RSAOAEP(true, publicKey, symmetricKey);
 
             return encryptedData;
         }
@@ -219,7 +233,10 @@ namespace SharedClasses
             f.Close();
             return data;
         }
-
+        /// <summary>
+        /// Fill a byte array with random data.
+        /// </summary>
+        /// <param name="toFill">Must be initialized.</param>
         public static void getRandomData(byte[] toFill)
         {
             random.NextBytes(toFill);

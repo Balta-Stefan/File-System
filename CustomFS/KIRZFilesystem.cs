@@ -94,6 +94,7 @@ namespace CustomFS
             {
                 uploadDir = new SharedClasses.File(uploadFolderName, root, true, DateTime.Now);
                 root.insertNewFile(uploadDir);
+                uploadDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
             }
             root.insertNewFile(sharedFolder);
             root.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
