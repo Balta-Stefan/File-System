@@ -27,6 +27,7 @@ namespace Server
         private static readonly string userDatabaseFilename = "Database.bin";
         private static readonly string serialNumberDatabaseFilename = "Serial number database.bin";
         private static readonly string sharedDirectoryFilename = "Shared directory.bin";
+        private static readonly string CRLfilename = "CRL.bin";
 
         //static readonly string CAfilename = "CAcert.pem";
         static readonly int cookieSize = 16; // 128 bits long
@@ -63,6 +64,7 @@ namespace Server
         private Dictionary<string, string> sessions = new Dictionary<string, string>(); // key = cookie, value = user name
         //private Dictionary<string, SharedClasses.File> userRoots = null; // contains root directories of the users (username is the key)
         private Dictionary<BigInteger, UserInformation> serialNumberDatabase;
+        private Dictionary<BigInteger, bool> CRL;
 
         public Server(AsymmetricCipherKeyPair keyPair)
         {
@@ -195,7 +197,7 @@ namespace Server
 
             // sign the certificate
             X509Certificate clientCert = CryptoUtilities.sign_CSR(registrationInfo.decodePEMcsr(), keyPair, BigInteger.Arbitrary(serial_number_size), serverDN, DateTime.UtcNow, DateTime.UtcNow.AddDays(certificateValidDurationDays));
-            UserInformation userInfo = new UserInformation(registrationInfo.userRoot, registrationInfo.password, registrationInfo.hashAlgorithm, registrationInfo.encryptionAlgorithm, registrationInfo.keyDerivationSalt, clientCert);
+            UserInformation userInfo = new UserInformation(registrationInfo.username, registrationInfo.userRoot, registrationInfo.password, registrationInfo.hashAlgorithm, registrationInfo.encryptionAlgorithm, registrationInfo.keyDerivationSalt, clientCert);
 
             // store the user into the database
             userDatabase.Add(registrationInfo.username, userInfo);
@@ -271,7 +273,8 @@ namespace Server
                 // check common name - to do
 
                 // check CRL list - to do
-
+                if (CRL.ContainsKey(clientCertificate.SerialNumber) == true)
+                    return false;
             }
             catch (Exception)
             {
@@ -331,6 +334,16 @@ namespace Server
                     sharedDirectory = (SharedClasses.File)bf.Deserialize(fs);
                 }
             }
+
+            if (System.IO.File.Exists(CRLfilename) == false)
+                CRL = new Dictionary<BigInteger, bool>();
+            else
+            {
+                using (FileStream fs = new FileStream(CRLfilename, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.Read))
+                {
+                    CRL = (Dictionary<BigInteger, bool>)bf.Deserialize(fs);
+                }
+            }
         }
         public void serializeDatabase()
         {
@@ -348,7 +361,15 @@ namespace Server
             {
                 bf.Serialize(fs, sharedDirectory);
             }
+            using (FileStream fs = new FileStream(sharedDirectoryFilename, System.IO.FileMode.Create, System.IO.FileAccess.Write, FileShare.Read))
+            {
+                bf.Serialize(fs, sharedDirectory);
+            }
             
+            using (FileStream fs = new FileStream(CRLfilename, System.IO.FileMode.Create, System.IO.FileAccess.Write, FileShare.Read))
+            {
+                bf.Serialize(fs, CRL);
+            }
         }
     
         void stop()
@@ -356,6 +377,20 @@ namespace Server
             run = false;
         }
 
+        void revokeCert()
+        {
+            Console.WriteLine("Enter username.");
+            string username = Console.ReadLine();
+
+            UserInformation userInfo;
+            if(userDatabase.TryGetValue(username, out userInfo) == false)
+            {
+                Console.WriteLine("User doesn't exist.");
+                return;
+            }
+
+            CRL.Add(userInfo.decodeCertificate().SerialNumber, true);
+        }
         static void Main(string[] args)
         {
             // get key pair
@@ -374,6 +409,7 @@ namespace Server
             while(runLoop)
             {
                 Console.WriteLine("1)Stop");
+                Console.WriteLine("2)Revoke certificate");
 
                 string choice = Console.ReadLine();
                 int choiceNum = 0;
@@ -392,6 +428,12 @@ namespace Server
                     case 1:
                         obj.stop();
                         runLoop = false;
+                        break;
+                    case 2:
+                        obj.revokeCert();
+                        break;
+                    default:
+                        Console.WriteLine("Incorrect input.");
                         break;
                 }
             }
