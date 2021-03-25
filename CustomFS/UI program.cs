@@ -485,7 +485,8 @@ namespace CustomFS
             //wantedFile.setData(fileStream.ToArray());
             //requireEncryption.Add(wantedFile);
             //filesystem.checkEncryptionUtility(wantedFile);
-            System.IO.File.Delete(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName);
+            string tmp = KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName;
+            System.IO.File.Delete(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + wantedFile.name);
             
         }
        
