@@ -544,9 +544,9 @@ namespace CustomFS
             {
                 filesystem.removeFile(path);
             }
-            catch(Exception)
+            catch(Exception e)
             {
-                Console.WriteLine("There has been an error while trying to delete the file.");
+                Console.WriteLine(e.Message);
             }
          
             foreach (string s in filesystem.getMessages())

@@ -435,7 +435,7 @@ namespace CustomFS
             if (file.isEncrypted() == true)
                 file.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             file.setData(newData);
-            file.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+            file.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm, true);
         }
 
         /// <summary>
