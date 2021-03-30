@@ -265,6 +265,7 @@ namespace SharedClasses
 
 				// does the file need to be encrypted, that is, does the signature have to be regenerated with own key?
 				encrypt(symmetricKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
+				sharedMetadata = null;
 
 				return;
 			}
