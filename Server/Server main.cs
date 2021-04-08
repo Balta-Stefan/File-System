@@ -74,7 +74,8 @@ namespace Server
 
         void receiveMessages()
         {
-            byte[] messageLengthBytes = new byte[2];
+            byte[] messageLengthBytes = new byte[8];
+            byte[] incomingBuffer = new byte[4096];
 
             try
             {
@@ -98,19 +99,30 @@ namespace Server
                         // obtain the message length represented by 2 bytes
                         clientSocket.Receive(messageLengthBytes);
 
-                        int messageLength = messageLengthBytes[0] | (messageLengthBytes[1] << 8);
+                        long messageLength = BitConverter.ToInt64(messageLengthBytes, 0);
 
                         // allocate a buffer for the incoming data
+                        // the problem is that the Receive method won't block until all of the data is received.It might stop earlier.
+
+
                         byte[] message = new byte[messageLength];
-                        clientSocket.Receive(message);
+                        //int bytesReceived = clientSocket.Receive(message);
+                        int totalBytesReceived = 0;
+
+                        while(totalBytesReceived != messageLength)
+                        {
+                            int bytesReceived = clientSocket.Receive(incomingBuffer);
+                            Array.Copy(incomingBuffer, 0, message, totalBytesReceived, bytesReceived);
+                            totalBytesReceived += bytesReceived;
+                        }
 
                         // send the length of the session object to the client
                         byte[] session = determineMessageType(message);
-                        messageLengthBytes[0] = (byte)(session.Length & 0xFF);
-                        messageLengthBytes[1] = (byte)((session.Length & 0xFF00) >> 8);
+                        //messageLengthBytes[0] = (byte)(session.Length & 0xFF);
+                        //messageLengthBytes[1] = (byte)((session.Length & 0xFF00) >> 8);
 
                        
-                        clientSocket.Send(messageLengthBytes);
+                        clientSocket.Send(BitConverter.GetBytes((long)(session.Length)));
                         clientSocket.Send(session);
 
                         clientSocket.Shutdown(SocketShutdown.Both);
@@ -272,7 +284,6 @@ namespace Server
                     return false;
                 // check common name - to do
 
-                // check CRL list - to do
                 if (CRL.ContainsKey(clientCertificate.SerialNumber) == true)
                     return false;
             }
@@ -396,7 +407,17 @@ namespace Server
             // get key pair
             //AsymmetricCipherKeyPair CAkeyPair = CryptoUtilities.load_keypair_from_file("CAkey.pem");
             //AsymmetricCipherKeyPair clientKeyPair = CryptoUtilities.generate_RSA_key_pair(2048);
-            AsymmetricCipherKeyPair keyPair = CryptoUtilities.load_keypair_from_file("CAkey.pem");
+            AsymmetricCipherKeyPair keyPair;
+            try
+            {
+                keyPair = CryptoUtilities.load_keypair_from_file("CAkey.pem");
+            }
+            catch(Exception e)
+            {
+                Console.WriteLine(e.Message);
+                Console.ReadLine();
+                return;
+            }
             Server obj = new Server(keyPair);
 
             obj.deserializeDatabase();
