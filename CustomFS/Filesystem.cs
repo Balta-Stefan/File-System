@@ -25,7 +25,7 @@ namespace CustomFS
     [Serializable]
     abstract class Filesystem
     {
-       
+
 
         protected SharedClasses.File root;
         protected SharedClasses.File uploadFolder;
@@ -48,7 +48,7 @@ namespace CustomFS
 
         ~Filesystem()
         {
-            if(encryptionKey != null)
+            if (encryptionKey != null)
                 Array.Clear(encryptionKey, 0, encryptionKey.Length);
         }
         /// <summary>
@@ -72,7 +72,7 @@ namespace CustomFS
             {
                 root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 messageQueue.Enqueue(e.Message);
                 throw new Exception("Cannot decrypt the root directory.");
@@ -98,7 +98,7 @@ namespace CustomFS
             {
                 root.decrypt(encryptionKey, keyPair, hashingAlgorithm, encryptionAlgorithm);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 messageQueue.Enqueue(e.Message);
             }
@@ -111,7 +111,7 @@ namespace CustomFS
 
             return files;
         }
-        
+
         /// <param name="path">Directory name or path (absolute/relative).</param>
         /// <returns>True for success, false otherwise.</returns>
         public void makeDirectory(string path)
@@ -311,7 +311,7 @@ namespace CustomFS
 
             //sourceFile.parentDir = destinationFile;
 
-            
+
             //sourceFile.parentDir.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //sourceFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
             //destinationFile.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair, hashingAlgorithm, encryptionAlgorithm);
@@ -399,7 +399,7 @@ namespace CustomFS
                 uploadFolder.encrypt(encryptionKey, CryptoUtilities.getIVlength(encryptionAlgorithm), keyPair.Private, hashingAlgorithm, encryptionAlgorithm);
             }
         }
-        
+
         private MemoryStream loadFile(string path)
         {
             MemoryStream inMemoryCopy = new MemoryStream();

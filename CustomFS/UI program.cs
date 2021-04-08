@@ -66,7 +66,7 @@ namespace CustomFS
             ConsoleKeyInfo key;
             byte[] temporaryPassword = new byte[15];
             int passwordLength = 0;
-            
+
 
             Console.Write("Enter password: ");
             do
@@ -74,9 +74,9 @@ namespace CustomFS
                 key = Console.ReadKey(true);
                 // Ignore any key out of alphanumeric range.
 
-                if((int)key.Key == 8) // backspace
+                if ((int)key.Key == 8) // backspace
                 {
-                    if(passwordLength > 0)
+                    if (passwordLength > 0)
                     {
                         passwordLength--;
                         Console.Write("\b \b");
@@ -87,11 +87,11 @@ namespace CustomFS
                     // Append the character to the password.
                     temporaryPassword[passwordLength++] = (byte)key.KeyChar;
                     Console.Write("*");
-                    if(passwordLength == temporaryPassword.Length)
+                    if (passwordLength == temporaryPassword.Length)
                     {
                         // reallocate the array
                         byte[] tempPass = new byte[passwordLength * 2];
-                        for(int i = 0; i < passwordLength; i++)
+                        for (int i = 0; i < passwordLength; i++)
                         {
                             // zero out the old password
                             tempPass[i] = temporaryPassword[i];
@@ -149,9 +149,9 @@ namespace CustomFS
                 return false;
             else if ((first == null && second != null) || (first != null && second == null))
                 return false;
-            else if(first != null && second != null)
+            else if (first != null && second != null)
             {
-                for(int i = 0; i < first.Length; i++)
+                for (int i = 0; i < first.Length; i++)
                 {
                     if (first[i] != second[i])
                         return false;
@@ -159,7 +159,7 @@ namespace CustomFS
             }
             return true;
         }
-        
+
         public MemoryStream loadFile(string path)
         {
             MemoryStream inMemoryCopy = new MemoryStream();
@@ -182,7 +182,7 @@ namespace CustomFS
 
             return response.decodePublicKey();
         }
-        
+
         /// <param name="toShareArgs">Format: "username of the receiver" "file path"</param>
         public void shareFile(string toShareArgs)
         {
@@ -226,7 +226,7 @@ namespace CustomFS
                     return;
                 }
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine("Error obtaining the user's public key.");
                 return;
@@ -235,7 +235,7 @@ namespace CustomFS
             try
             {
                 SharedClasses.File fileForSharing = filesystem.findFile(filePath);
-                if(fileForSharing == null)
+                if (fileForSharing == null)
                 {
                     Console.WriteLine("Specified file doesn't exist.");
                     return;
@@ -248,7 +248,7 @@ namespace CustomFS
                 SharedClasses.Message.ShareFile shareMessage = new Message.ShareFile(fileToSend, serverPublicKey);
                 Message.ShareFile reply = (Message.ShareFile)KIRZFilesystem.sendDataToServer(KIRZFilesystem.serializeObject(shareMessage));
                 reply.decrypt(serverPublicKey);
-                if(reply.fileToShare == null)
+                if (reply.fileToShare == null)
                 {
                     Console.WriteLine("Error - couldn't obtain the shared directory from server.");
                     return;
@@ -271,7 +271,7 @@ namespace CustomFS
             {
                 toOpen = filesystem.downloadFile(fileName);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
                 return;
@@ -300,7 +300,7 @@ namespace CustomFS
             {
                 filesystem.makeDirectory(path);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
             }
@@ -336,12 +336,12 @@ namespace CustomFS
             {
                 filesystem.makeTextFile(fileName, contents);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
             }
         }
-        
+
         private void editTextFileUtility(char[] charArray, int limit)
         {
             Console.Clear();
@@ -366,7 +366,7 @@ namespace CustomFS
                 textArray = new char[15];
             else
                 limit = textArray.Length;
-                
+
 
             Console.Clear();
             editTextFileUtility(textArray, limit);
@@ -425,7 +425,7 @@ namespace CustomFS
             SharedClasses.File wantedFile = filesystem.findFile(fileName);
             try
             {
-                if(wantedFile == null)
+                if (wantedFile == null)
                 {
                     Console.WriteLine("Given path doesn't exist.");
                     return;
@@ -458,7 +458,7 @@ namespace CustomFS
             {
                 text = System.IO.File.ReadAllText(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + wantedFile.name);
             }
-            catch(Exception)
+            catch (Exception)
             {
                 Console.WriteLine("Error reading the downloaded file.");
                 return;
@@ -480,30 +480,30 @@ namespace CustomFS
                 return;
             }
 
-          
+
             filesystem.setFileData(wantedFile, Encoding.UTF8.GetBytes(str));
             //wantedFile.setData(fileStream.ToArray());
             //requireEncryption.Add(wantedFile);
             //filesystem.checkEncryptionUtility(wantedFile);
             string tmp = KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + fileName;
             System.IO.File.Delete(KIRZFilesystem.downloadFolderName + Path.DirectorySeparatorChar + wantedFile.name);
-            
+
         }
-       
+
         private void move(string arg)
         {
             // arg should contain 2 paths separated by space, each specified between double quotes ("first" "second")
 
-            if(arg.Length < 5)
+            if (arg.Length < 5)
             {
                 Console.WriteLine("Incorrect arguments.Specify them as \"first path\" \"second path\"");
                 return;
             }
-             
+
             arg = arg.Substring(1);
             int secondQuote = arg.IndexOf('"');
 
-            if(secondQuote == -1)
+            if (secondQuote == -1)
             {
                 Console.WriteLine("Incorrect arguments.Specify them as \"first path\" \"second path\"");
                 return;
@@ -514,20 +514,20 @@ namespace CustomFS
             {
                 sourcePath = arg.Substring(0, secondQuote);
                 destinationPath = arg.Substring(secondQuote + 3);
-                destinationPath = destinationPath.Substring(0, destinationPath.Length-1); // remove the last quote
+                destinationPath = destinationPath.Substring(0, destinationPath.Length - 1); // remove the last quote
             }
-            catch(Exception)
+            catch (Exception)
             {
                 Console.WriteLine("Incorrect arguments.Specify them as \"first path\" \"second path\"");
                 return;
             }
-           
+
             // move the files
             try
             {
                 filesystem.move(sourcePath, destinationPath);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
             }
@@ -537,18 +537,18 @@ namespace CustomFS
                     Console.WriteLine(s);
             }
         }
-        
+
         private void remove(string path)
         {
             try
             {
                 filesystem.removeFile(path);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
             }
-         
+
             foreach (string s in filesystem.getMessages())
                 Console.WriteLine(s);
         }
@@ -557,7 +557,7 @@ namespace CustomFS
         {
             if (filesystem.changeDirectory(path) == false)
                 Console.WriteLine("Requested directory doesn't exist!");
-          
+
             foreach (string s in filesystem.getMessages())
                 Console.WriteLine(s);
         }
@@ -569,7 +569,7 @@ namespace CustomFS
             {
                 filesystem.uploadFile(fileName);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
             }
@@ -581,7 +581,7 @@ namespace CustomFS
             {
                 filesystem.downloadFile(filePath);
             }
-            catch(Exception e) { Console.WriteLine(e.Message); }
+            catch (Exception e) { Console.WriteLine(e.Message); }
         }
 
         private void displayCurrentPath()
@@ -593,7 +593,7 @@ namespace CustomFS
             string[] parts = command.Split(' ');
 
             // commands without arguments
-            switch(command)
+            switch (command)
             {
                 case "ls":
                     listDir();
@@ -656,7 +656,7 @@ namespace CustomFS
                 Console.WriteLine("Incorrect input");
             }
         }
-        
+
         object deserializeFile(string fileName)
         {
             try
@@ -667,7 +667,7 @@ namespace CustomFS
                     return bf.Deserialize(stream);
                 }
             }
-            catch(Exception)
+            catch (Exception)
             {
                 return null;
             }
@@ -799,13 +799,13 @@ namespace CustomFS
             Console.WriteLine("Enter common name: ");
             string commonName = Console.ReadLine();
             Console.WriteLine("Enter organization name: ");
-            string organizationName = "ETF";// Console.ReadLine();
+            string organizationName = Console.ReadLine();
             Console.WriteLine("Enter organization unit: ");
-            string organizationUnit = "RI";// Console.ReadLine();
+            string organizationUnit = Console.ReadLine();
             Console.WriteLine("Enter state: ");
-            string state = "RS";// Console.ReadLine();
+            string state = Console.ReadLine();
             Console.WriteLine("Enter country: ");
-            string country = "BiH";// Console.ReadLine();
+            string country = Console.ReadLine();
 
             byte[] keyDerivationSalt = new byte[16];
             CryptoUtilities.getRandomData(keyDerivationSalt);
@@ -894,7 +894,7 @@ namespace CustomFS
             }
 
             keyPair = CryptoUtilities.load_keypair_from_file(keypairFile);
-          
+
             runProgram();
         }
 
@@ -925,7 +925,7 @@ namespace CustomFS
             {
                 obj.setup();
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Console.WriteLine(e.Message);
                 Console.ReadLine();
@@ -952,7 +952,7 @@ namespace CustomFS
                     {
                         case 1:
                             obj.get_login_credentials();
-                            Console.WriteLine(obj.clientCertificate.ToString());
+                            //Console.WriteLine(obj.clientCertificate.ToString());
                             break;
                         case 2:
                             obj.register();
@@ -968,12 +968,12 @@ namespace CustomFS
                 {
                     Console.WriteLine(e.Message);
                 }
-        
+
                 //runProgram();
             }
-          
+
             //string temp = Console.ReadLine();
-            
+
             /*RsaKeyPairGenerator generator = new RsaKeyPairGenerator();
             generator.Init(new KeyGenerationParameters(new SecureRandom(), 2048));
             AsymmetricCipherKeyPair keypair = generator.GenerateKeyPair();
@@ -987,7 +987,7 @@ namespace CustomFS
             byte[] decrypted = RSAOAEP(false, keypair.Public, encrypted);
 
             Console.WriteLine(Encoding.UTF8.GetString(decrypted));*/
-           
+
             /*obj.deserializeDatabase(); // call on startup every time
 
             //obj.registerUser();

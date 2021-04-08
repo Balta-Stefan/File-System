@@ -27,6 +27,7 @@ namespace CustomFS
         public static object sendDataToServer(byte[] send)
         {
             byte[] receivedData = null;
+            byte[] incomingBuffer = new byte[4096];
 
             try
             {
@@ -37,21 +38,31 @@ namespace CustomFS
 
                 socket.Connect(endPoint);
 
-                int messageLength = send.Length;
+                long messageLength = send.Length;
 
-                // message length will be represented by 2 bytes
-                int upper = messageLength & 0xFF00;
-                byte[] messageLenBytes = new byte[2] { (byte)(messageLength & 0xFF), (byte)((messageLength & 0xFF00) >> 8) };
-                socket.Send(messageLenBytes);
+                // message length will be represented by 8 bytes
 
+                socket.Send(BitConverter.GetBytes(messageLength));
                 int bytesSent = socket.Send(send);
 
-                byte[] receivingMessageLen = new byte[2];
+                byte[] receivingMessageLen = new byte[8];
                 socket.Receive(receivingMessageLen);
-                int receivingMessageLength = receivingMessageLen[0] | (receivingMessageLen[1] << 8);
+                long receivingMessageLength = BitConverter.ToInt64(receivingMessageLen, 0);
 
                 receivedData = new byte[receivingMessageLength];
-                socket.Receive(receivedData);
+
+                int totalBytesReceived = 0;
+
+                while (totalBytesReceived != receivingMessageLength)
+                {
+                    int bytesReceived = socket.Receive(incomingBuffer);
+
+                    Array.Copy(incomingBuffer, 0, receivedData, totalBytesReceived, bytesReceived);
+                    totalBytesReceived += bytesReceived;
+
+                }
+
+                //socket.Receive(receivedData);
 
                 socket.Shutdown(SocketShutdown.Both);
                 socket.Close();
@@ -63,7 +74,7 @@ namespace CustomFS
                     return bf.Deserialize(ms);
                 }
             }
-            catch (Exception)
+            catch (Exception e)
             {
                 return null;
             }
@@ -72,7 +83,7 @@ namespace CustomFS
         public static byte[] serializeObject(object obj)
         {
             BinaryFormatter bf = new BinaryFormatter();
-            using(MemoryStream ms = new MemoryStream())
+            using (MemoryStream ms = new MemoryStream())
             {
                 bf.Serialize(ms, obj);
                 ms.Position = 0;
@@ -105,10 +116,11 @@ namespace CustomFS
             sharedFolder.traverseDirectory(out sharedFolderContents);
 
             foreach (SharedClasses.File f in sharedFolderContents)
-                f.parentDir = sharedFolder;
-            
+                f.changeParentDir(sharedFolder);
+            //f.parentDir = sharedFolder;
+
         }
-        
+
         //public KIRZFilesystem(byte[] encryptionKey, integrityHashAlgorithm hashingAlgorithm, encryptionAlgorithms encryptionAlgorithm, AsymmetricCipherKeyPair keyPair, Credentials loginCreds) : base(encryptionKey, hashingAlgorithm, encryptionAlgorithm, keyPair, loginCreds) { }
 
         /// <summary>
@@ -124,7 +136,7 @@ namespace CustomFS
 
             // serialize the file
             BinaryFormatter bf = new BinaryFormatter();
-            
+
 
             // log the user out - to do 
             // remove the shared directory from the file system
@@ -177,6 +189,9 @@ namespace CustomFS
         /// <param name="contents"></param>
         public void makeTextFile(string fileName, string contents)
         {
+            if (workingDirectory == sharedFolder)
+                throw new Exception("Cannot make files in the shared directory.");
+
             if (fileName.EndsWith(".txt") == false)
                 fileName += ".txt";
 
@@ -202,7 +217,14 @@ namespace CustomFS
             //sharedFolder = sharedDir.cloneFile();
             sharedFolder = new SharedClasses.File(sharedFolderName, root, true, DateTime.UtcNow);
             sharedDir.cloneFile(sharedFolder);
-           
+            sharedFolder.parentDir = root;
+
+            List<SharedClasses.File> sharedFolderContents;
+            sharedFolder.traverseDirectory(out sharedFolderContents);
+
+            foreach (SharedClasses.File f in sharedFolderContents)
+                f.changeParentDir(sharedFolder);
+
             //sharedFolder.parentDir = root;
 
             // encrypt the file to avoid integrity warnings
